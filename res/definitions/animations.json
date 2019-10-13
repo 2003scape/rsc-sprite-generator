@@ -1,0 +1,954 @@
+[
+    {
+        "sprite": 0,
+        "overlay": 1
+    },
+    {
+        "sprite": 27,
+        "overlay": 2
+    },
+    {
+        "sprite": 54,
+        "overlay": 3
+    },
+    {
+        "sprite": 81,
+        "overlay": 1
+    },
+    {
+        "sprite": 108,
+        "overlay": 2
+    },
+    {
+        "sprite": 135,
+        "overlay": 1
+    },
+    {
+        "sprite": 162,
+        "overlay": 1
+    },
+    {
+        "sprite": 189,
+        "overlay": 1
+    },
+    {
+        "sprite": 216,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 243,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 243,
+        "overlay": 9789488
+    },
+    {
+        "sprite": 270,
+        "overlay": 5592405
+    },
+    {
+        "sprite": 297,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 297,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 297,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 297,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 297,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 297,
+        "overlay": 65535
+    },
+    {
+        "sprite": 297,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 297,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 324,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 324,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 324,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 324,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 324,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 324,
+        "overlay": 65535
+    },
+    {
+        "sprite": 324,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 351,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 351,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 351,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 351,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 351,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 351,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 351,
+        "overlay": 65535
+    },
+    {
+        "sprite": 351,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 351,
+        "overlay": 10083839
+    },
+    {
+        "sprite": 378,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 378,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 378,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 378,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 378,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 378,
+        "overlay": 65535
+    },
+    {
+        "sprite": 378,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 378,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 378,
+        "overlay": 10083839
+    },
+    {
+        "sprite": 405,
+        "overlay": 0
+    },
+    {
+        "sprite": 432,
+        "overlay": 0
+    },
+    {
+        "sprite": 459,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 459,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 459,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 459,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 459,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 459,
+        "overlay": 65535
+    },
+    {
+        "sprite": 459,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 486,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 486,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 486,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 486,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 486,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 486,
+        "overlay": 65535
+    },
+    {
+        "sprite": 486,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 243,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 513,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 513,
+        "overlay": 2434341
+    },
+    {
+        "sprite": 513,
+        "overlay": 4210926
+    },
+    {
+        "sprite": 513,
+        "overlay": 4246592
+    },
+    {
+        "sprite": 513,
+        "overlay": 15658560
+    },
+    {
+        "sprite": 513,
+        "overlay": 15636736
+    },
+    {
+        "sprite": 513,
+        "overlay": 11141341
+    },
+    {
+        "sprite": 540,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 540,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 540,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 540,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 540,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 540,
+        "overlay": 65535
+    },
+    {
+        "sprite": 540,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 567,
+        "overlay": 255
+    },
+    {
+        "sprite": 594,
+        "overlay": 255
+    },
+    {
+        "sprite": 594,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 621,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 621,
+        "overlay": 16763980
+    },
+    {
+        "sprite": 648,
+        "overlay": 255
+    },
+    {
+        "sprite": 567,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 567,
+        "overlay": 10510400
+    },
+    {
+        "sprite": 567,
+        "overlay": 15609904
+    },
+    {
+        "sprite": 567,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 648,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 648,
+        "overlay": 10510400
+    },
+    {
+        "sprite": 648,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 648,
+        "overlay": 16036851
+    },
+    {
+        "sprite": 648,
+        "overlay": 15609904
+    },
+    {
+        "sprite": 648,
+        "overlay": 8400921
+    },
+    {
+        "sprite": 648,
+        "overlay": 7824998
+    },
+    {
+        "sprite": 648,
+        "overlay": 7829367
+    },
+    {
+        "sprite": 648,
+        "overlay": 2245205
+    },
+    {
+        "sprite": 648,
+        "overlay": 4347170
+    },
+    {
+        "sprite": 648,
+        "overlay": 26214
+    },
+    {
+        "sprite": 675,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 675,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 675,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 675,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 675,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 675,
+        "overlay": 56797
+    },
+    {
+        "sprite": 675,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 675,
+        "overlay": 16750896
+    },
+    {
+        "sprite": 675,
+        "overlay": 11363121
+    },
+    {
+        "sprite": 702,
+        "overlay": 0
+    },
+    {
+        "sprite": 729,
+        "overlay": 0
+    },
+    {
+        "sprite": 756,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 756,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 756,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 756,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 756,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 756,
+        "overlay": 65535
+    },
+    {
+        "sprite": 756,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 783,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 783,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 783,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 783,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 783,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 783,
+        "overlay": 65535
+    },
+    {
+        "sprite": 783,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 810,
+        "overlay": 0
+    },
+    {
+        "sprite": 837,
+        "overlay": 4805259
+    },
+    {
+        "sprite": 864,
+        "overlay": 16384000
+    },
+    {
+        "sprite": 891,
+        "overlay": 13408576
+    },
+    {
+        "sprite": 891,
+        "overlay": 16728144
+    },
+    {
+        "sprite": 918,
+        "overlay": 0
+    },
+    {
+        "sprite": 945,
+        "overlay": 0
+    },
+    {
+        "sprite": 972,
+        "overlay": 0
+    },
+    {
+        "sprite": 999,
+        "overlay": 0
+    },
+    {
+        "sprite": 1026,
+        "overlay": 0
+    },
+    {
+        "sprite": 1053,
+        "overlay": 0
+    },
+    {
+        "sprite": 1080,
+        "overlay": 0
+    },
+    {
+        "sprite": 1107,
+        "overlay": 0
+    },
+    {
+        "sprite": 1134,
+        "overlay": 0
+    },
+    {
+        "sprite": 1161,
+        "overlay": 0
+    },
+    {
+        "sprite": 1188,
+        "overlay": 0
+    },
+    {
+        "sprite": 1215,
+        "overlay": 0
+    },
+    {
+        "sprite": 1242,
+        "overlay": 8969727
+    },
+    {
+        "sprite": 1242,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1242,
+        "overlay": 47872
+    },
+    {
+        "sprite": 1269,
+        "overlay": 65535
+    },
+    {
+        "sprite": 1296,
+        "overlay": 0
+    },
+    {
+        "sprite": 1323,
+        "overlay": 65280
+    },
+    {
+        "sprite": 1323,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1323,
+        "overlay": 21981
+    },
+    {
+        "sprite": 1350,
+        "overlay": 0
+    },
+    {
+        "sprite": 1350,
+        "overlay": 10066329
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16776960
+    },
+    {
+        "sprite": 1377,
+        "overlay": 255
+    },
+    {
+        "sprite": 1377,
+        "overlay": 65280
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16711935
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 432,
+        "overlay": 11202303
+    },
+    {
+        "sprite": 1053,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 486,
+        "overlay": 10083839
+    },
+    {
+        "sprite": 648,
+        "overlay": 1118481
+    },
+    {
+        "sprite": 1350,
+        "overlay": 9789488
+    },
+    {
+        "sprite": 891,
+        "overlay": 65535
+    },
+    {
+        "sprite": 756,
+        "overlay": 16711748
+    },
+    {
+        "sprite": 459,
+        "overlay": 16711748
+    },
+    {
+        "sprite": 1404,
+        "overlay": 0
+    },
+    {
+        "sprite": 864,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 1323,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 891,
+        "overlay": 14535680
+    },
+    {
+        "sprite": 1350,
+        "overlay": 2236962
+    },
+    {
+        "sprite": 999,
+        "overlay": 2236962
+    },
+    {
+        "sprite": 864,
+        "overlay": 6291456
+    },
+    {
+        "sprite": 891,
+        "overlay": 2236962
+    },
+    {
+        "sprite": 621,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 837,
+        "overlay": 11184810
+    },
+    {
+        "sprite": 540,
+        "overlay": 11250603
+    },
+    {
+        "sprite": 324,
+        "overlay": 11250603
+    },
+    {
+        "sprite": 594,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 54,
+        "overlay": 9785408
+    },
+    {
+        "sprite": 1431,
+        "overlay": 0
+    },
+    {
+        "sprite": 540,
+        "overlay": 16711748
+    },
+    {
+        "sprite": 891,
+        "overlay": 3852326
+    },
+    {
+        "sprite": 1458,
+        "overlay": 0
+    },
+    {
+        "sprite": 1485,
+        "overlay": 52224
+    },
+    {
+        "sprite": 567,
+        "overlay": 1052688
+    },
+    {
+        "sprite": 648,
+        "overlay": 1052688
+    },
+    {
+        "sprite": 1485,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1485,
+        "overlay": 255
+    },
+    {
+        "sprite": 648,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 648,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 648,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 648,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 648,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 594,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 594,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 594,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 594,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 594,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 567,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 567,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 567,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 567,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 567,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 567,
+        "overlay": 3978097
+    },
+    {
+        "sprite": 648,
+        "overlay": 3978097
+    },
+    {
+        "sprite": 270,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 270,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 270,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 270,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 270,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 1512,
+        "overlay": 0
+    },
+    {
+        "sprite": 1539,
+        "overlay": 0
+    },
+    {
+        "sprite": 1566,
+        "overlay": 0
+    },
+    {
+        "sprite": 270,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 54,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 567,
+        "overlay": 8421376
+    },
+    {
+        "sprite": 648,
+        "overlay": 8421376
+    },
+    {
+        "sprite": 513,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 1350,
+        "overlay": 13420580
+    },
+    {
+        "sprite": 1593,
+        "overlay": 0
+    },
+    {
+        "sprite": 1620,
+        "overlay": 0
+    },
+    {
+        "sprite": 1458,
+        "overlay": 56797
+    },
+    {
+        "sprite": 648,
+        "overlay": 1392384
+    },
+    {
+        "sprite": 567,
+        "overlay": 1392384
+    },
+    {
+        "sprite": 1350,
+        "overlay": 5585408
+    },
+    {
+        "sprite": 1053,
+        "overlay": 6893315
+    },
+    {
+        "sprite": 675,
+        "overlay": 13500416
+    },
+    {
+        "sprite": 513,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 270,
+        "overlay": 1118481
+    },
+    {
+        "sprite": 567,
+        "overlay": 1118481
+    },
+    {
+        "sprite": 1647,
+        "overlay": 0
+    },
+    {
+        "sprite": 1377,
+        "overlay": -13421773
+    },
+    {
+        "sprite": 1323,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1674,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 1674,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 1674,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 1674,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 1674,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 1674,
+        "overlay": 65535
+    },
+    {
+        "sprite": 1674,
+        "overlay": 3158064
+    }
+]

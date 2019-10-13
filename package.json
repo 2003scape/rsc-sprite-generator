@@ -1,0 +1,29 @@
+{
+  "name": "rsc-sprite-generator",
+  "version": "1.0.0",
+  "description": "generate entity sprites for NPCs/players for runescape classic",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2003scape/rsc-sprite-generator.git"
+  },
+  "keywords": [
+    "runescape",
+    "rsc",
+    "sprite",
+    "graphics"
+  ],
+  "author": "2003Scape Team",
+  "license": "AGPL-3.0+",
+  "bugs": {
+    "url": "https://github.com/2003scape/rsc-sprite-generator/issues"
+  },
+  "homepage": "https://github.com/2003scape/rsc-sprite-generator#readme",
+  "dependencies": {
+    "canvas": "^2.6.0",
+    "defaults": "^1.0.3"
+  }
+}

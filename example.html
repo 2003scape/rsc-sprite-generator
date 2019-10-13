@@ -1,0 +1,6945 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>---</title>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport" />
+<meta charset=utf-8></head>
+<body></body>
+<script>
+(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+const spriteGenerator = require('./');
+const fs = require('fs').promises;
+
+const HEADS = [0, 3, 5, 6, 7];
+
+(async () => {
+    try {
+        const avatar = await spriteGenerator.player({
+            angle: Math.floor(Math.random() * (14 + 3)),
+            head: HEADS[Math.floor(Math.random() * HEADS.length)],
+            body: Math.random() >= 0.5 ? 4 : 1,
+            colours: { 
+                hair: Math.floor(Math.random() * 10),
+                top: Math.floor(Math.random() * 15), 
+                legs: Math.floor(Math.random() * 15), 
+                skin: Math.floor(Math.random() * 4)
+            },
+            wielding: [81]
+        });
+
+        if (typeof window !== 'undefined') {
+            document.body.appendChild(avatar);
+        } else {
+            await fs.writeFile('./avatar.png', avatar.toBuffer());
+        }
+    } catch (e) {
+        console.error(e);
+    }
+})();
+
+},{"./":2,"fs":11}],2:[function(require,module,exports){
+(function (__dirname){
+const defaults = require('defaults');
+const definitions = require('./res/definitions');
+const fs = require('fs').promises;
+const path = require('path');
+const { createCanvas } = require('canvas');
+let { Image } = require('canvas');
+
+const AVATAR_WIDTH = 86;
+const AVATAR_HEIGHT = 115;
+
+const AVATAR_DEFAULTS = {
+    angle: 1,
+    head: 0, // possible values are 0, 3, 5, 6 and 7
+    body: 1, // possible values are 1 and 4
+    colours: { hair: 2, top: 8, legs: 14, skin: 0 },
+    wielding: []
+};
+
+// various character colours that are defined in the client defined in 32-bit
+// integers (rgb).
+const SKIN_COLOURS = [ 0xecded0, 0xccb366, 0xb38c40, 0x997326, 0x906020 ];
+
+const HAIR_COLOURS = [
+    0xffc030, 0xffa040, 0x805030, 0x604020, 0x303030, 0xff6020,
+    0xff4000, 0xffffff, 65280, 65535
+];
+
+const TOP_COLOURS = [
+    0xff0000, 0xff8000, 0xffe000, 0xa0e000, 57344, 32768, 41088, 45311,
+    33023, 12528, 0xe000e0, 0x303030, 0x604000, 0x805000, 0xffffff
+];
+
+// the orders of which part of the character stack in depending on the angle.
+const SPRITE_ORDER = {
+    FRONT: [
+        'cape', 'legs', 'skirt', 'body', 'neck', 'head', 'med', 'chain',
+        'left', 'right', 'boots'
+    ],
+    BACK: [
+        'left', 'right', 'legs', 'skirt', 'body', 'neck', 'head', 'med',
+        'chain', 'cape', 'boots'
+    ],
+    COMBAT: [
+        'cape', 'legs', 'skirt', 'body', 'neck', 'head', 'med',
+        'chain', 'boots', 'left', 'right' 
+    ]
+};
+
+// which part of the character each position number corresponds to.
+const WIELD_SLOTS = {
+    11: 'cape', 4: 'right', 3: 'left', 6: 'chain', 0: 'head', 5: 'med',
+    8: 'neck', 1: 'body', 7: 'skirt', 2: 'legs', 9: 'boots'
+};
+
+const SPRITE_PATH = path.resolve(__dirname, 'res', 'sprites', '%id.png');
+
+if (typeof window !== 'undefined') {
+    module.exports.spritePath = '/res/sprites/%id.png';
+    Image = window.Image;
+} else {
+    module.exports.spritePath = SPRITE_PATH;
+}
+
+function fetchSprite(index) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+
+        image.onerror = err => reject(err);
+        image.onload = () => resolve(image);
+        image.src = module.exports.spritePath.replace('%id', index);
+    });
+};
+
+// apply a colour filter to the sprite (for skin and/or armour colours).
+function colourizeSprite(sprite, overlay, skin) {
+    const canvas = createCanvas(sprite.width, sprite.height);
+    const context = canvas.getContext('2d');
+
+    if (overlay) {
+        overlay = {
+            r: (overlay >> 16) & 0xff,
+            g: (overlay >> 8) & 0xff,
+            b: overlay & 0xff
+        };
+    }
+
+    if (skin) {
+        skin = {
+            r: (skin >> 16) & 0xff,
+            g: (skin >> 8) & 0xff,
+            b: skin & 0xff
+        };
+    }
+
+    context.drawImage(sprite, 0, 0);
+
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+
+    for (i = 0; i < pixels.data.length; i += 4) {
+        const r = pixels.data[i];
+        const g = pixels.data[i + 1];
+        const b = pixels.data[i + 2];
+
+        if (skin) {
+            if (r === 255 && g === b) {
+                pixels.data[i] = (r * skin.r >> 8);
+                pixels.data[i + 1] = (g * skin.g >> 8);
+                pixels.data[i + 2] = (b * skin.b >> 8);
+            }
+        }
+
+        if (overlay) {
+            if (r === g && g === b && r === b) {
+                pixels.data[i] = (r * overlay.r >> 8);
+                pixels.data[i + 1] = (g * overlay.g >> 8);
+                pixels.data[i + 2] = (b * overlay.b >> 8);
+            }
+        }
+    }
+
+    context.putImageData(pixels, 0, 0);
+
+    return canvas;
+}
+
+async function fetchAnimation(animation, angle) {
+    let sprite = await fetchSprite(animation.sprite + angle);
+
+    if (animation.overlay > 5) {
+        sprite = colourizeSprite(sprite, animation.overlay);
+    }
+
+    return sprite;
+}
+
+async function generatePlayer(player) {
+    const canvas = createCanvas(AVATAR_WIDTH, AVATAR_HEIGHT);
+    const context = canvas.getContext('2d');
+
+    const character = {};
+    const colours = {};
+
+    defaults(player, AVATAR_DEFAULTS);
+
+    for (const id of player.wielding) {
+        const wield = definitions.wieldable[id];
+        const animation = wield.animation;
+        const name = WIELD_SLOTS[wield.position];
+
+        character[name] = animation - 1;
+    }
+
+    // only add character sprites when there are no equibable items in those
+    // slots.
+    if (!character.head) {
+        character.head = player.head;
+        colours.head = HAIR_COLOURS[player.colours.hair];
+    }
+
+    if (!character.body) {
+        character.body = player.body;
+        colours.body = TOP_COLOURS[player.colours.top];
+    }
+
+    if (!character.legs) {
+        character.legs = 2;
+        colours.legs = TOP_COLOURS[player.colours.legs];
+    }
+
+    // apply and store the image buffers for each section of the character,
+    // along with the offset to draw them at.
+    for (const section of Object.keys(character)) {
+        const animation = definitions.animations[character[section]];
+
+        let image = await fetchAnimation(animation, player.angle);
+
+        const colour = colours[section];
+
+        if (colour) {
+            image = colourizeSprite(image, colour,
+                SKIN_COLOURS[player.colours.skin]);
+        }
+
+        // skin colour overlay for female platebodies.
+        if (animation.sprite === 486) {
+            image = colourizeSprite(image, null,
+                SKIN_COLOURS[player.colours.skin]);
+        }
+
+        const shift = definitions.shifts[animation.sprite + player.angle];
+
+        character[section] = {
+            image: image,
+            shift: shift
+        };
+    }
+
+    let order;
+
+    if (player.angle < 15) {
+        order = player.angle >= 8 ? SPRITE_ORDER.BACK : SPRITE_ORDER.FRONT;
+    } else {
+        order = SPRITE_ORDER.COMBAT;
+    }
+
+    // draw the buffered, coloured sprites in the correct order given the
+    // angle.
+    for (const section of order) {
+        const sprite = character[section];
+
+        if (sprite) {
+            context.drawImage(sprite.image, sprite.shift.x, sprite.shift.y);
+        }
+    }
+
+    return canvas;
+};
+
+module.exports.player = generatePlayer;
+}).call(this,"/")
+},{"./res/definitions":8,"canvas":3,"defaults":6,"fs":11,"path":15}],3:[function(require,module,exports){
+/* globals document, ImageData */
+
+const parseFont = require('./lib/parse-font')
+
+exports.parseFont = parseFont
+
+exports.createCanvas = function (width, height) {
+  return Object.assign(document.createElement('canvas'), { width: width, height: height })
+}
+
+exports.createImageData = function (array, width, height) {
+  // Browser implementation of ImageData looks at the number of arguments passed
+  switch (arguments.length) {
+    case 0: return new ImageData()
+    case 1: return new ImageData(array)
+    case 2: return new ImageData(array, width)
+    default: return new ImageData(array, width, height)
+  }
+}
+
+exports.loadImage = function (src, options) {
+  return new Promise(function (resolve, reject) {
+    const image = Object.assign(document.createElement('img'), options)
+
+    function cleanup () {
+      image.onload = null
+      image.onerror = null
+    }
+
+    image.onload = function () { cleanup(); resolve(image) }
+    image.onerror = function () { cleanup(); reject(new Error('Failed to load the image "' + src + '"')) }
+
+    image.src = src
+  })
+}
+
+},{"./lib/parse-font":4}],4:[function(require,module,exports){
+'use strict'
+
+/**
+ * Font RegExp helpers.
+ */
+
+const weights = 'bold|bolder|lighter|[1-9]00'
+  , styles = 'italic|oblique'
+  , variants = 'small-caps'
+  , stretches = 'ultra-condensed|extra-condensed|condensed|semi-condensed|semi-expanded|expanded|extra-expanded|ultra-expanded'
+  , units = 'px|pt|pc|in|cm|mm|%|em|ex|ch|rem|q'
+  , string = '\'([^\']+)\'|"([^"]+)"|[\\w\\s-]+'
+
+// [ [ <‘font-style’> || <font-variant-css21> || <‘font-weight’> || <‘font-stretch’> ]?
+//    <‘font-size’> [ / <‘line-height’> ]? <‘font-family’> ]
+// https://drafts.csswg.org/css-fonts-3/#font-prop
+const weightRe = new RegExp('(' + weights + ') +', 'i')
+const styleRe = new RegExp('(' + styles + ') +', 'i')
+const variantRe = new RegExp('(' + variants + ') +', 'i')
+const stretchRe = new RegExp('(' + stretches + ') +', 'i')
+const sizeFamilyRe = new RegExp(
+  '([\\d\\.]+)(' + units + ') *'
+  + '((?:' + string + ')( *, *(?:' + string + '))*)')
+
+/**
+ * Cache font parsing.
+ */
+
+const cache = {}
+
+const defaultHeight = 16 // pt, common browser default
+
+/**
+ * Parse font `str`.
+ *
+ * @param {String} str
+ * @return {Object} Parsed font. `size` is in device units. `unit` is the unit
+ *   appearing in the input string.
+ * @api private
+ */
+
+module.exports = function (str) {
+  // Cached
+  if (cache[str]) return cache[str]
+
+  // Try for required properties first.
+  const sizeFamily = sizeFamilyRe.exec(str)
+  if (!sizeFamily) return // invalid
+
+  // Default values and required properties
+  const font = {
+    weight: 'normal',
+    style: 'normal',
+    stretch: 'normal',
+    variant: 'normal',
+    size: parseFloat(sizeFamily[1]),
+    unit: sizeFamily[2],
+    family: sizeFamily[3].replace(/["']/g, '').replace(/ *, */g, ',')
+  }
+
+  // Optional, unordered properties.
+  let weight, style, variant, stretch
+  // Stop search at `sizeFamily.index`
+  let substr = str.substring(0, sizeFamily.index)
+  if ((weight = weightRe.exec(substr))) font.weight = weight[1]
+  if ((style = styleRe.exec(substr))) font.style = style[1]
+  if ((variant = variantRe.exec(substr))) font.variant = variant[1]
+  if ((stretch = stretchRe.exec(substr))) font.stretch = stretch[1]
+
+  // Convert to device units. (`font.unit` is the original unit)
+  // TODO: ch, ex
+  switch (font.unit) {
+    case 'pt':
+      font.size /= 0.75
+      break
+    case 'pc':
+      font.size *= 16
+      break
+    case 'in':
+      font.size *= 96
+      break
+    case 'cm':
+      font.size *= 96.0 / 2.54
+      break
+    case 'mm':
+      font.size *= 96.0 / 25.4
+      break
+    case '%':
+      // TODO disabled because existing unit tests assume 100
+      // font.size *= defaultHeight / 100 / 0.75
+      break
+    case 'em':
+    case 'rem':
+      font.size *= defaultHeight / 0.75
+      break
+    case 'q':
+      font.size *= 96 / 25.4 / 4
+      break
+  }
+
+  return (cache[str] = font)
+}
+
+},{}],5:[function(require,module,exports){
+(function (Buffer){
+var clone = (function() {
+'use strict';
+
+/**
+ * Clones (copies) an Object using deep copying.
+ *
+ * This function supports circular references by default, but if you are certain
+ * there are no circular references in your object, you can save some CPU time
+ * by calling clone(obj, false).
+ *
+ * Caution: if `circular` is false and `parent` contains circular references,
+ * your program may enter an infinite loop and crash.
+ *
+ * @param `parent` - the object to be cloned
+ * @param `circular` - set to true if the object to be cloned may contain
+ *    circular references. (optional - true by default)
+ * @param `depth` - set to a number if the object is only to be cloned to
+ *    a particular depth. (optional - defaults to Infinity)
+ * @param `prototype` - sets the prototype to be used when cloning an object.
+ *    (optional - defaults to parent prototype).
+*/
+function clone(parent, circular, depth, prototype) {
+  var filter;
+  if (typeof circular === 'object') {
+    depth = circular.depth;
+    prototype = circular.prototype;
+    filter = circular.filter;
+    circular = circular.circular
+  }
+  // maintain two arrays for circular references, where corresponding parents
+  // and children have the same index
+  var allParents = [];
+  var allChildren = [];
+
+  var useBuffer = typeof Buffer != 'undefined';
+
+  if (typeof circular == 'undefined')
+    circular = true;
+
+  if (typeof depth == 'undefined')
+    depth = Infinity;
+
+  // recurse this function so we don't reset allParents and allChildren
+  function _clone(parent, depth) {
+    // cloning null always returns null
+    if (parent === null)
+      return null;
+
+    if (depth == 0)
+      return parent;
+
+    var child;
+    var proto;
+    if (typeof parent != 'object') {
+      return parent;
+    }
+
+    if (clone.__isArray(parent)) {
+      child = [];
+    } else if (clone.__isRegExp(parent)) {
+      child = new RegExp(parent.source, __getRegExpFlags(parent));
+      if (parent.lastIndex) child.lastIndex = parent.lastIndex;
+    } else if (clone.__isDate(parent)) {
+      child = new Date(parent.getTime());
+    } else if (useBuffer && Buffer.isBuffer(parent)) {
+      if (Buffer.allocUnsafe) {
+        // Node.js >= 4.5.0
+        child = Buffer.allocUnsafe(parent.length);
+      } else {
+        // Older Node.js versions
+        child = new Buffer(parent.length);
+      }
+      parent.copy(child);
+      return child;
+    } else {
+      if (typeof prototype == 'undefined') {
+        proto = Object.getPrototypeOf(parent);
+        child = Object.create(proto);
+      }
+      else {
+        child = Object.create(prototype);
+        proto = prototype;
+      }
+    }
+
+    if (circular) {
+      var index = allParents.indexOf(parent);
+
+      if (index != -1) {
+        return allChildren[index];
+      }
+      allParents.push(parent);
+      allChildren.push(child);
+    }
+
+    for (var i in parent) {
+      var attrs;
+      if (proto) {
+        attrs = Object.getOwnPropertyDescriptor(proto, i);
+      }
+
+      if (attrs && attrs.set == null) {
+        continue;
+      }
+      child[i] = _clone(parent[i], depth - 1);
+    }
+
+    return child;
+  }
+
+  return _clone(parent, depth);
+}
+
+/**
+ * Simple flat clone using prototype, accepts only objects, usefull for property
+ * override on FLAT configuration object (no nested props).
+ *
+ * USE WITH CAUTION! This may not behave as you wish if you do not know how this
+ * works.
+ */
+clone.clonePrototype = function clonePrototype(parent) {
+  if (parent === null)
+    return null;
+
+  var c = function () {};
+  c.prototype = parent;
+  return new c();
+};
+
+// private utility functions
+
+function __objToStr(o) {
+  return Object.prototype.toString.call(o);
+};
+clone.__objToStr = __objToStr;
+
+function __isDate(o) {
+  return typeof o === 'object' && __objToStr(o) === '[object Date]';
+};
+clone.__isDate = __isDate;
+
+function __isArray(o) {
+  return typeof o === 'object' && __objToStr(o) === '[object Array]';
+};
+clone.__isArray = __isArray;
+
+function __isRegExp(o) {
+  return typeof o === 'object' && __objToStr(o) === '[object RegExp]';
+};
+clone.__isRegExp = __isRegExp;
+
+function __getRegExpFlags(re) {
+  var flags = '';
+  if (re.global) flags += 'g';
+  if (re.ignoreCase) flags += 'i';
+  if (re.multiline) flags += 'm';
+  return flags;
+};
+clone.__getRegExpFlags = __getRegExpFlags;
+
+return clone;
+})();
+
+if (typeof module === 'object' && module.exports) {
+  module.exports = clone;
+}
+
+}).call(this,require("buffer").Buffer)
+},{"buffer":12}],6:[function(require,module,exports){
+var clone = require('clone');
+
+module.exports = function(options, defaults) {
+  options = options || {};
+
+  Object.keys(defaults).forEach(function(key) {
+    if (typeof options[key] === 'undefined') {
+      options[key] = clone(defaults[key]);
+    }
+  });
+
+  return options;
+};
+},{"clone":5}],7:[function(require,module,exports){
+module.exports=[
+    {
+        "sprite": 0,
+        "overlay": 1
+    },
+    {
+        "sprite": 27,
+        "overlay": 2
+    },
+    {
+        "sprite": 54,
+        "overlay": 3
+    },
+    {
+        "sprite": 81,
+        "overlay": 1
+    },
+    {
+        "sprite": 108,
+        "overlay": 2
+    },
+    {
+        "sprite": 135,
+        "overlay": 1
+    },
+    {
+        "sprite": 162,
+        "overlay": 1
+    },
+    {
+        "sprite": 189,
+        "overlay": 1
+    },
+    {
+        "sprite": 216,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 243,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 243,
+        "overlay": 9789488
+    },
+    {
+        "sprite": 270,
+        "overlay": 5592405
+    },
+    {
+        "sprite": 297,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 297,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 297,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 297,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 297,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 297,
+        "overlay": 65535
+    },
+    {
+        "sprite": 297,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 297,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 324,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 324,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 324,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 324,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 324,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 324,
+        "overlay": 65535
+    },
+    {
+        "sprite": 324,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 351,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 351,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 351,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 351,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 351,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 351,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 351,
+        "overlay": 65535
+    },
+    {
+        "sprite": 351,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 351,
+        "overlay": 10083839
+    },
+    {
+        "sprite": 378,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 378,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 378,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 378,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 378,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 378,
+        "overlay": 65535
+    },
+    {
+        "sprite": 378,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 378,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 378,
+        "overlay": 10083839
+    },
+    {
+        "sprite": 405,
+        "overlay": 0
+    },
+    {
+        "sprite": 432,
+        "overlay": 0
+    },
+    {
+        "sprite": 459,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 459,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 459,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 459,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 459,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 459,
+        "overlay": 65535
+    },
+    {
+        "sprite": 459,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 486,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 486,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 486,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 486,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 486,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 486,
+        "overlay": 65535
+    },
+    {
+        "sprite": 486,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 243,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 513,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 513,
+        "overlay": 2434341
+    },
+    {
+        "sprite": 513,
+        "overlay": 4210926
+    },
+    {
+        "sprite": 513,
+        "overlay": 4246592
+    },
+    {
+        "sprite": 513,
+        "overlay": 15658560
+    },
+    {
+        "sprite": 513,
+        "overlay": 15636736
+    },
+    {
+        "sprite": 513,
+        "overlay": 11141341
+    },
+    {
+        "sprite": 540,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 540,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 540,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 540,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 540,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 540,
+        "overlay": 65535
+    },
+    {
+        "sprite": 540,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 567,
+        "overlay": 255
+    },
+    {
+        "sprite": 594,
+        "overlay": 255
+    },
+    {
+        "sprite": 594,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 621,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 621,
+        "overlay": 16763980
+    },
+    {
+        "sprite": 648,
+        "overlay": 255
+    },
+    {
+        "sprite": 567,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 567,
+        "overlay": 10510400
+    },
+    {
+        "sprite": 567,
+        "overlay": 15609904
+    },
+    {
+        "sprite": 567,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 648,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 648,
+        "overlay": 10510400
+    },
+    {
+        "sprite": 648,
+        "overlay": 4210752
+    },
+    {
+        "sprite": 648,
+        "overlay": 16036851
+    },
+    {
+        "sprite": 648,
+        "overlay": 15609904
+    },
+    {
+        "sprite": 648,
+        "overlay": 8400921
+    },
+    {
+        "sprite": 648,
+        "overlay": 7824998
+    },
+    {
+        "sprite": 648,
+        "overlay": 7829367
+    },
+    {
+        "sprite": 648,
+        "overlay": 2245205
+    },
+    {
+        "sprite": 648,
+        "overlay": 4347170
+    },
+    {
+        "sprite": 648,
+        "overlay": 26214
+    },
+    {
+        "sprite": 675,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 675,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 675,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 675,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 675,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 675,
+        "overlay": 56797
+    },
+    {
+        "sprite": 675,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 675,
+        "overlay": 16750896
+    },
+    {
+        "sprite": 675,
+        "overlay": 11363121
+    },
+    {
+        "sprite": 702,
+        "overlay": 0
+    },
+    {
+        "sprite": 729,
+        "overlay": 0
+    },
+    {
+        "sprite": 756,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 756,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 756,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 756,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 756,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 756,
+        "overlay": 65535
+    },
+    {
+        "sprite": 756,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 783,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 783,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 783,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 783,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 783,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 783,
+        "overlay": 65535
+    },
+    {
+        "sprite": 783,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 810,
+        "overlay": 0
+    },
+    {
+        "sprite": 837,
+        "overlay": 4805259
+    },
+    {
+        "sprite": 864,
+        "overlay": 16384000
+    },
+    {
+        "sprite": 891,
+        "overlay": 13408576
+    },
+    {
+        "sprite": 891,
+        "overlay": 16728144
+    },
+    {
+        "sprite": 918,
+        "overlay": 0
+    },
+    {
+        "sprite": 945,
+        "overlay": 0
+    },
+    {
+        "sprite": 972,
+        "overlay": 0
+    },
+    {
+        "sprite": 999,
+        "overlay": 0
+    },
+    {
+        "sprite": 1026,
+        "overlay": 0
+    },
+    {
+        "sprite": 1053,
+        "overlay": 0
+    },
+    {
+        "sprite": 1080,
+        "overlay": 0
+    },
+    {
+        "sprite": 1107,
+        "overlay": 0
+    },
+    {
+        "sprite": 1134,
+        "overlay": 0
+    },
+    {
+        "sprite": 1161,
+        "overlay": 0
+    },
+    {
+        "sprite": 1188,
+        "overlay": 0
+    },
+    {
+        "sprite": 1215,
+        "overlay": 0
+    },
+    {
+        "sprite": 1242,
+        "overlay": 8969727
+    },
+    {
+        "sprite": 1242,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1242,
+        "overlay": 47872
+    },
+    {
+        "sprite": 1269,
+        "overlay": 65535
+    },
+    {
+        "sprite": 1296,
+        "overlay": 0
+    },
+    {
+        "sprite": 1323,
+        "overlay": 65280
+    },
+    {
+        "sprite": 1323,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1323,
+        "overlay": 21981
+    },
+    {
+        "sprite": 1350,
+        "overlay": 0
+    },
+    {
+        "sprite": 1350,
+        "overlay": 10066329
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16776960
+    },
+    {
+        "sprite": 1377,
+        "overlay": 255
+    },
+    {
+        "sprite": 1377,
+        "overlay": 65280
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16711935
+    },
+    {
+        "sprite": 1377,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 432,
+        "overlay": 11202303
+    },
+    {
+        "sprite": 1053,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 486,
+        "overlay": 10083839
+    },
+    {
+        "sprite": 648,
+        "overlay": 1118481
+    },
+    {
+        "sprite": 1350,
+        "overlay": 9789488
+    },
+    {
+        "sprite": 891,
+        "overlay": 65535
+    },
+    {
+        "sprite": 756,
+        "overlay": 16711748
+    },
+    {
+        "sprite": 459,
+        "overlay": 16711748
+    },
+    {
+        "sprite": 1404,
+        "overlay": 0
+    },
+    {
+        "sprite": 864,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 1323,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 891,
+        "overlay": 14535680
+    },
+    {
+        "sprite": 1350,
+        "overlay": 2236962
+    },
+    {
+        "sprite": 999,
+        "overlay": 2236962
+    },
+    {
+        "sprite": 864,
+        "overlay": 6291456
+    },
+    {
+        "sprite": 891,
+        "overlay": 2236962
+    },
+    {
+        "sprite": 621,
+        "overlay": 3158064
+    },
+    {
+        "sprite": 837,
+        "overlay": 11184810
+    },
+    {
+        "sprite": 540,
+        "overlay": 11250603
+    },
+    {
+        "sprite": 324,
+        "overlay": 11250603
+    },
+    {
+        "sprite": 594,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 54,
+        "overlay": 9785408
+    },
+    {
+        "sprite": 1431,
+        "overlay": 0
+    },
+    {
+        "sprite": 540,
+        "overlay": 16711748
+    },
+    {
+        "sprite": 891,
+        "overlay": 3852326
+    },
+    {
+        "sprite": 1458,
+        "overlay": 0
+    },
+    {
+        "sprite": 1485,
+        "overlay": 52224
+    },
+    {
+        "sprite": 567,
+        "overlay": 1052688
+    },
+    {
+        "sprite": 648,
+        "overlay": 1052688
+    },
+    {
+        "sprite": 1485,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1485,
+        "overlay": 255
+    },
+    {
+        "sprite": 648,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 648,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 648,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 648,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 648,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 594,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 594,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 594,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 594,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 594,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 567,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 567,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 567,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 567,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 567,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 567,
+        "overlay": 3978097
+    },
+    {
+        "sprite": 648,
+        "overlay": 3978097
+    },
+    {
+        "sprite": 270,
+        "overlay": 16755370
+    },
+    {
+        "sprite": 270,
+        "overlay": 11206570
+    },
+    {
+        "sprite": 270,
+        "overlay": 11184895
+    },
+    {
+        "sprite": 270,
+        "overlay": 16777164
+    },
+    {
+        "sprite": 270,
+        "overlay": 13434879
+    },
+    {
+        "sprite": 1512,
+        "overlay": 0
+    },
+    {
+        "sprite": 1539,
+        "overlay": 0
+    },
+    {
+        "sprite": 1566,
+        "overlay": 0
+    },
+    {
+        "sprite": 270,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 54,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 567,
+        "overlay": 8421376
+    },
+    {
+        "sprite": 648,
+        "overlay": 8421376
+    },
+    {
+        "sprite": 513,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 1350,
+        "overlay": 13420580
+    },
+    {
+        "sprite": 1593,
+        "overlay": 0
+    },
+    {
+        "sprite": 1620,
+        "overlay": 0
+    },
+    {
+        "sprite": 1458,
+        "overlay": 56797
+    },
+    {
+        "sprite": 648,
+        "overlay": 1392384
+    },
+    {
+        "sprite": 567,
+        "overlay": 1392384
+    },
+    {
+        "sprite": 1350,
+        "overlay": 5585408
+    },
+    {
+        "sprite": 1053,
+        "overlay": 6893315
+    },
+    {
+        "sprite": 675,
+        "overlay": 13500416
+    },
+    {
+        "sprite": 513,
+        "overlay": 16777215
+    },
+    {
+        "sprite": 270,
+        "overlay": 1118481
+    },
+    {
+        "sprite": 567,
+        "overlay": 1118481
+    },
+    {
+        "sprite": 1647,
+        "overlay": 0
+    },
+    {
+        "sprite": 1377,
+        "overlay": -13421773
+    },
+    {
+        "sprite": 1323,
+        "overlay": 16711680
+    },
+    {
+        "sprite": 1674,
+        "overlay": 16737817
+    },
+    {
+        "sprite": 1674,
+        "overlay": 15654365
+    },
+    {
+        "sprite": 1674,
+        "overlay": 15658734
+    },
+    {
+        "sprite": 1674,
+        "overlay": 10072780
+    },
+    {
+        "sprite": 1674,
+        "overlay": 11717785
+    },
+    {
+        "sprite": 1674,
+        "overlay": 65535
+    },
+    {
+        "sprite": 1674,
+        "overlay": 3158064
+    }
+]
+},{}],8:[function(require,module,exports){
+module.exports = {
+    animations: require('./animations'),
+    shifts: require('./shifts'),
+    wieldable: require('./wieldable')
+};
+
+},{"./animations":7,"./shifts":9,"./wieldable":10}],9:[function(require,module,exports){
+module.exports={
+    "0": { "x": 24, "y": 9 },
+    "1": { "x": 24, "y": 9 },
+    "2": { "x": 24, "y": 9 },
+    "3": { "x": 22, "y": 9 },
+    "4": { "x": 22, "y": 9 },
+    "5": { "x": 22, "y": 9 },
+    "6": { "x": 23, "y": 9 },
+    "7": { "x": 23, "y": 9 },
+    "8": { "x": 23, "y": 9 },
+    "9": { "x": 23, "y": 9 },
+    "10": { "x": 23, "y": 9 },
+    "11": { "x": 23, "y": 9 },
+    "12": { "x": 25, "y": 9 },
+    "13": { "x": 25, "y": 9 },
+    "14": { "x": 25, "y": 9 },
+    "15": { "x": 8, "y": 9 },
+    "16": { "x": 13, "y": 9 },
+    "17": { "x": 19, "y": 9 },
+    "27": { "x": 13, "y": 25 },
+    "28": { "x": 12, "y": 25 },
+    "29": { "x": 12, "y": 25 },
+    "30": { "x": 14, "y": 25 },
+    "31": { "x": 14, "y": 25 },
+    "32": { "x": 14, "y": 25 },
+    "33": { "x": 22, "y": 23 },
+    "34": { "x": 22, "y": 23 },
+    "35": { "x": 22, "y": 23 },
+    "36": { "x": 15, "y": 23 },
+    "37": { "x": 15, "y": 23 },
+    "38": { "x": 15, "y": 23 },
+    "39": { "x": 12, "y": 24 },
+    "40": { "x": 12, "y": 24 },
+    "41": { "x": 13, "y": 24 },
+    "42": { "x": 7, "y": 23 },
+    "43": { "x": 11, "y": 23 },
+    "44": { "x": 15, "y": 23 },
+    "54": { "x": 17, "y": 58 },
+    "55": { "x": 19, "y": 58 },
+    "56": { "x": 21, "y": 58 },
+    "57": { "x": 22, "y": 56 },
+    "58": { "x": 22, "y": 56 },
+    "59": { "x": 20, "y": 56 },
+    "60": { "x": 15, "y": 58 },
+    "61": { "x": 24, "y": 58 },
+    "62": { "x": 19, "y": 58 },
+    "63": { "x": 18, "y": 56 },
+    "64": { "x": 20, "y": 56 },
+    "65": { "x": 20, "y": 56 },
+    "66": { "x": 19, "y": 58 },
+    "67": { "x": 19, "y": 58 },
+    "68": { "x": 20, "y": 58 },
+    "69": { "x": 0, "y": 57 },
+    "70": { "x": 3, "y": 56 },
+    "71": { "x": 7, "y": 55 },
+    "81": { "x": 22, "y": 9 },
+    "82": { "x": 22, "y": 9 },
+    "83": { "x": 22, "y": 9 },
+    "84": { "x": 20, "y": 9 },
+    "85": { "x": 20, "y": 9 },
+    "86": { "x": 20, "y": 9 },
+    "87": { "x": 20, "y": 9 },
+    "88": { "x": 20, "y": 9 },
+    "89": { "x": 20, "y": 9 },
+    "90": { "x": 21, "y": 9 },
+    "91": { "x": 21, "y": 9 },
+    "92": { "x": 21, "y": 9 },
+    "93": { "x": 23, "y": 9 },
+    "94": { "x": 23, "y": 9 },
+    "95": { "x": 23, "y": 9 },
+    "96": { "x": 5, "y": 9 },
+    "97": { "x": 10, "y": 9 },
+    "98": { "x": 16, "y": 9 },
+    "108": { "x": 13, "y": 25 },
+    "109": { "x": 13, "y": 25 },
+    "110": { "x": 12, "y": 25 },
+    "111": { "x": 15, "y": 25 },
+    "112": { "x": 15, "y": 25 },
+    "113": { "x": 16, "y": 25 },
+    "114": { "x": 22, "y": 23 },
+    "115": { "x": 22, "y": 23 },
+    "116": { "x": 22, "y": 23 },
+    "117": { "x": 17, "y": 23 },
+    "118": { "x": 17, "y": 23 },
+    "119": { "x": 16, "y": 23 },
+    "120": { "x": 12, "y": 24 },
+    "121": { "x": 12, "y": 24 },
+    "122": { "x": 13, "y": 24 },
+    "123": { "x": 7, "y": 23 },
+    "124": { "x": 12, "y": 23 },
+    "125": { "x": 16, "y": 23 },
+    "135": { "x": 25, "y": 10 },
+    "136": { "x": 25, "y": 10 },
+    "137": { "x": 25, "y": 10 },
+    "138": { "x": 23, "y": 10 },
+    "139": { "x": 23, "y": 10 },
+    "140": { "x": 23, "y": 10 },
+    "141": { "x": 22, "y": 10 },
+    "142": { "x": 22, "y": 10 },
+    "143": { "x": 22, "y": 10 },
+    "144": { "x": 23, "y": 10 },
+    "145": { "x": 23, "y": 10 },
+    "146": { "x": 23, "y": 10 },
+    "147": { "x": 24, "y": 10 },
+    "148": { "x": 24, "y": 10 },
+    "149": { "x": 24, "y": 10 },
+    "150": { "x": 7, "y": 10 },
+    "151": { "x": 12, "y": 10 },
+    "152": { "x": 18, "y": 10 },
+    "162": { "x": 24, "y": 9 },
+    "163": { "x": 24, "y": 9 },
+    "164": { "x": 24, "y": 9 },
+    "165": { "x": 22, "y": 9 },
+    "166": { "x": 22, "y": 9 },
+    "167": { "x": 22, "y": 9 },
+    "168": { "x": 23, "y": 9 },
+    "169": { "x": 23, "y": 9 },
+    "170": { "x": 23, "y": 9 },
+    "171": { "x": 23, "y": 9 },
+    "172": { "x": 23, "y": 9 },
+    "173": { "x": 23, "y": 9 },
+    "174": { "x": 25, "y": 9 },
+    "175": { "x": 25, "y": 9 },
+    "176": { "x": 25, "y": 9 },
+    "177": { "x": 8, "y": 9 },
+    "178": { "x": 13, "y": 9 },
+    "179": { "x": 19, "y": 9 },
+    "189": { "x": 24, "y": 9 },
+    "190": { "x": 24, "y": 9 },
+    "191": { "x": 24, "y": 9 },
+    "192": { "x": 22, "y": 9 },
+    "193": { "x": 22, "y": 9 },
+    "194": { "x": 22, "y": 9 },
+    "195": { "x": 23, "y": 9 },
+    "196": { "x": 23, "y": 9 },
+    "197": { "x": 23, "y": 9 },
+    "198": { "x": 23, "y": 9 },
+    "199": { "x": 23, "y": 9 },
+    "200": { "x": 23, "y": 9 },
+    "201": { "x": 25, "y": 9 },
+    "202": { "x": 25, "y": 9 },
+    "203": { "x": 25, "y": 9 },
+    "204": { "x": 8, "y": 9 },
+    "205": { "x": 13, "y": 9 },
+    "206": { "x": 19, "y": 9 },
+    "216": { "x": 23, "y": 0 },
+    "217": { "x": 23, "y": 0 },
+    "218": { "x": 23, "y": 0 },
+    "219": { "x": 21, "y": 0 },
+    "220": { "x": 21, "y": 0 },
+    "221": { "x": 21, "y": 0 },
+    "222": { "x": 20, "y": 0 },
+    "223": { "x": 20, "y": 0 },
+    "224": { "x": 20, "y": 0 },
+    "225": { "x": 22, "y": 0 },
+    "226": { "x": 22, "y": 0 },
+    "227": { "x": 22, "y": 0 },
+    "228": { "x": 22, "y": 0 },
+    "229": { "x": 22, "y": 0 },
+    "230": { "x": 22, "y": 0 },
+    "231": { "x": 5, "y": 0 },
+    "232": { "x": 10, "y": 0 },
+    "233": { "x": 16, "y": 0 },
+    "243": { "x": 19, "y": 24 },
+    "244": { "x": 19, "y": 24 },
+    "245": { "x": 19, "y": 24 },
+    "246": { "x": 21, "y": 25 },
+    "247": { "x": 21, "y": 25 },
+    "248": { "x": 21, "y": 25 },
+    "249": { "x": 23, "y": 25 },
+    "250": { "x": 23, "y": 25 },
+    "251": { "x": 23, "y": 25 },
+    "252": { "x": 18, "y": 24 },
+    "253": { "x": 18, "y": 24 },
+    "254": { "x": 18, "y": 24 },
+    "255": { "x": 19, "y": 24 },
+    "256": { "x": 19, "y": 24 },
+    "257": { "x": 19, "y": 24 },
+    "258": { "x": 8, "y": 25 },
+    "259": { "x": 12, "y": 25 },
+    "260": { "x": 16, "y": 25 },
+    "270": { "x": 15, "y": 82 },
+    "271": { "x": 18, "y": 85 },
+    "272": { "x": 20, "y": 83 },
+    "273": { "x": 25, "y": 82 },
+    "274": { "x": 22, "y": 84 },
+    "275": { "x": 19, "y": 84 },
+    "276": { "x": 15, "y": 84 },
+    "277": { "x": 24, "y": 85 },
+    "278": { "x": 18, "y": 86 },
+    "279": { "x": 18, "y": 84 },
+    "280": { "x": 20, "y": 85 },
+    "281": { "x": 23, "y": 85 },
+    "282": { "x": 17, "y": 83 },
+    "283": { "x": 18, "y": 85 },
+    "284": { "x": 19, "y": 83 },
+    "285": { "x": 0, "y": 84 },
+    "286": { "x": 3, "y": 84 },
+    "287": { "x": 6, "y": 83 },
+    "297": { "x": 24, "y": 0 },
+    "298": { "x": 24, "y": 0 },
+    "299": { "x": 24, "y": 0 },
+    "300": { "x": 20, "y": 0 },
+    "301": { "x": 20, "y": 0 },
+    "302": { "x": 20, "y": 0 },
+    "303": { "x": 17, "y": 0 },
+    "304": { "x": 17, "y": 0 },
+    "305": { "x": 17, "y": 0 },
+    "306": { "x": 21, "y": 0 },
+    "307": { "x": 21, "y": 0 },
+    "308": { "x": 21, "y": 0 },
+    "309": { "x": 24, "y": 0 },
+    "310": { "x": 24, "y": 0 },
+    "311": { "x": 24, "y": 0 },
+    "312": { "x": 2, "y": 0 },
+    "313": { "x": 7, "y": 0 },
+    "314": { "x": 13, "y": 0 },
+    "324": { "x": 21, "y": 25 },
+    "325": { "x": 21, "y": 25 },
+    "326": { "x": 21, "y": 25 },
+    "327": { "x": 22, "y": 25 },
+    "328": { "x": 22, "y": 25 },
+    "329": { "x": 22, "y": 25 },
+    "330": { "x": 22, "y": 24 },
+    "331": { "x": 22, "y": 24 },
+    "332": { "x": 22, "y": 24 },
+    "333": { "x": 20, "y": 24 },
+    "334": { "x": 20, "y": 24 },
+    "335": { "x": 20, "y": 24 },
+    "336": { "x": 21, "y": 25 },
+    "337": { "x": 21, "y": 25 },
+    "338": { "x": 21, "y": 25 },
+    "339": { "x": 7, "y": 24 },
+    "340": { "x": 11, "y": 24 },
+    "341": { "x": 15, "y": 24 },
+    "351": { "x": 11, "y": 25 },
+    "352": { "x": 11, "y": 25 },
+    "353": { "x": 10, "y": 25 },
+    "354": { "x": 14, "y": 25 },
+    "355": { "x": 14, "y": 25 },
+    "356": { "x": 14, "y": 25 },
+    "357": { "x": 22, "y": 24 },
+    "358": { "x": 22, "y": 24 },
+    "359": { "x": 22, "y": 24 },
+    "360": { "x": 14, "y": 23 },
+    "361": { "x": 14, "y": 23 },
+    "362": { "x": 14, "y": 23 },
+    "363": { "x": 10, "y": 24 },
+    "364": { "x": 11, "y": 24 },
+    "365": { "x": 10, "y": 24 },
+    "366": { "x": 7, "y": 24 },
+    "367": { "x": 11, "y": 24 },
+    "368": { "x": 15, "y": 24 },
+    "378": { "x": 15, "y": 58 },
+    "379": { "x": 18, "y": 58 },
+    "380": { "x": 20, "y": 58 },
+    "381": { "x": 22, "y": 56 },
+    "382": { "x": 22, "y": 56 },
+    "383": { "x": 19, "y": 55 },
+    "384": { "x": 15, "y": 57 },
+    "385": { "x": 24, "y": 57 },
+    "386": { "x": 18, "y": 57 },
+    "387": { "x": 18, "y": 56 },
+    "388": { "x": 20, "y": 56 },
+    "389": { "x": 20, "y": 56 },
+    "390": { "x": 17, "y": 58 },
+    "391": { "x": 18, "y": 58 },
+    "392": { "x": 19, "y": 58 },
+    "393": { "x": 0, "y": 56 },
+    "394": { "x": 3, "y": 55 },
+    "395": { "x": 8, "y": 54 },
+    "405": { "x": 15, "y": 25 },
+    "406": { "x": 15, "y": 25 },
+    "407": { "x": 15, "y": 25 },
+    "408": { "x": 15, "y": 25 },
+    "409": { "x": 15, "y": 25 },
+    "410": { "x": 15, "y": 25 },
+    "411": { "x": 22, "y": 24 },
+    "412": { "x": 22, "y": 24 },
+    "413": { "x": 22, "y": 24 },
+    "414": { "x": 16, "y": 24 },
+    "415": { "x": 16, "y": 24 },
+    "416": { "x": 16, "y": 24 },
+    "417": { "x": 15, "y": 25 },
+    "418": { "x": 15, "y": 25 },
+    "419": { "x": 15, "y": 25 },
+    "420": { "x": 7, "y": 24 },
+    "421": { "x": 11, "y": 24 },
+    "422": { "x": 15, "y": 24 },
+    "432": { "x": 12, "y": 50 },
+    "433": { "x": 11, "y": 51 },
+    "434": { "x": 10, "y": 50 },
+    "435": { "x": 15, "y": 50 },
+    "436": { "x": 17, "y": 51 },
+    "437": { "x": 18, "y": 51 },
+    "438": { "x": 25, "y": 45 },
+    "439": { "x": 29, "y": 43 },
+    "440": { "x": 32, "y": 52 },
+    "441": { "x": 20, "y": 49 },
+    "442": { "x": 17, "y": 48 },
+    "443": { "x": 15, "y": 47 },
+    "444": { "x": 11, "y": 50 },
+    "445": { "x": 11, "y": 51 },
+    "446": { "x": 12, "y": 50 },
+    "447": { "x": 15, "y": 32 },
+    "448": { "x": 26, "y": 34 },
+    "449": { "x": 39, "y": 39 },
+    "459": { "x": 17, "y": 27 },
+    "460": { "x": 15, "y": 29 },
+    "461": { "x": 13, "y": 27 },
+    "462": { "x": 18, "y": 32 },
+    "463": { "x": 21, "y": 31 },
+    "464": { "x": 25, "y": 28 },
+    "465": { "x": 27, "y": 30 },
+    "466": { "x": 32, "y": 29 },
+    "467": { "x": 36, "y": 27 },
+    "468": { "x": 44, "y": 28 },
+    "469": { "x": 49, "y": 24 },
+    "470": { "x": 44, "y": 25 },
+    "471": { "x": 40, "y": 41 },
+    "472": { "x": 41, "y": 36 },
+    "473": { "x": 42, "y": 23 },
+    "474": { "x": 5, "y": 6 },
+    "475": { "x": 32, "y": 9 },
+    "476": { "x": 40, "y": 29 },
+    "486": { "x": 12, "y": 25 },
+    "487": { "x": 11, "y": 25 },
+    "488": { "x": 10, "y": 25 },
+    "489": { "x": 14, "y": 25 },
+    "490": { "x": 14, "y": 25 },
+    "491": { "x": 14, "y": 25 },
+    "492": { "x": 22, "y": 23 },
+    "493": { "x": 22, "y": 23 },
+    "494": { "x": 22, "y": 23 },
+    "495": { "x": 16, "y": 23 },
+    "496": { "x": 16, "y": 23 },
+    "497": { "x": 16, "y": 23 },
+    "498": { "x": 10, "y": 24 },
+    "499": { "x": 11, "y": 24 },
+    "500": { "x": 12, "y": 24 },
+    "501": { "x": 7, "y": 23 },
+    "502": { "x": 12, "y": 23 },
+    "503": { "x": 16, "y": 23 },
+    "513": { "x": 14, "y": 23 },
+    "514": { "x": 14, "y": 23 },
+    "515": { "x": 15, "y": 23 },
+    "516": { "x": 16, "y": 23 },
+    "517": { "x": 14, "y": 23 },
+    "518": { "x": 13, "y": 23 },
+    "519": { "x": 14, "y": 23 },
+    "520": { "x": 18, "y": 23 },
+    "521": { "x": 13, "y": 23 },
+    "522": { "x": 13, "y": 23 },
+    "523": { "x": 14, "y": 23 },
+    "524": { "x": 14, "y": 23 },
+    "525": { "x": 13, "y": 23 },
+    "526": { "x": 12, "y": 23 },
+    "527": { "x": 13, "y": 23 },
+    "528": { "x": 0, "y": 23 },
+    "529": { "x": 0, "y": 23 },
+    "530": { "x": 0, "y": 23 },
+    "540": { "x": 24, "y": 8 },
+    "541": { "x": 24, "y": 8 },
+    "542": { "x": 24, "y": 8 },
+    "543": { "x": 22, "y": 8 },
+    "544": { "x": 22, "y": 8 },
+    "545": { "x": 22, "y": 8 },
+    "546": { "x": 23, "y": 7 },
+    "547": { "x": 23, "y": 7 },
+    "548": { "x": 23, "y": 7 },
+    "549": { "x": 23, "y": 7 },
+    "550": { "x": 23, "y": 7 },
+    "551": { "x": 23, "y": 7 },
+    "552": { "x": 25, "y": 7 },
+    "553": { "x": 25, "y": 7 },
+    "554": { "x": 25, "y": 7 },
+    "555": { "x": 8, "y": 7 },
+    "556": { "x": 13, "y": 7 },
+    "557": { "x": 19, "y": 7 },
+    "567": { "x": 11, "y": 23 },
+    "568": { "x": 10, "y": 23 },
+    "569": { "x": 10, "y": 23 },
+    "570": { "x": 12, "y": 23 },
+    "571": { "x": 13, "y": 23 },
+    "572": { "x": 13, "y": 23 },
+    "573": { "x": 21, "y": 22 },
+    "574": { "x": 21, "y": 22 },
+    "575": { "x": 21, "y": 22 },
+    "576": { "x": 14, "y": 21 },
+    "577": { "x": 14, "y": 21 },
+    "578": { "x": 14, "y": 21 },
+    "579": { "x": 11, "y": 23 },
+    "580": { "x": 10, "y": 23 },
+    "581": { "x": 10, "y": 23 },
+    "582": { "x": 6, "y": 22 },
+    "583": { "x": 10, "y": 22 },
+    "584": { "x": 14, "y": 22 },
+    "594": { "x": 20, "y": 0 },
+    "595": { "x": 20, "y": 0 },
+    "596": { "x": 20, "y": 0 },
+    "597": { "x": 18, "y": 0 },
+    "598": { "x": 18, "y": 0 },
+    "599": { "x": 18, "y": 0 },
+    "600": { "x": 19, "y": 0 },
+    "601": { "x": 19, "y": 0 },
+    "602": { "x": 19, "y": 0 },
+    "603": { "x": 19, "y": 0 },
+    "604": { "x": 19, "y": 0 },
+    "605": { "x": 19, "y": 0 },
+    "606": { "x": 20, "y": 0 },
+    "607": { "x": 20, "y": 0 },
+    "608": { "x": 20, "y": 0 },
+    "609": { "x": 4, "y": 0 },
+    "610": { "x": 9, "y": 0 },
+    "611": { "x": 15, "y": 0 },
+    "621": { "x": 26, "y": 25 },
+    "622": { "x": 26, "y": 25 },
+    "623": { "x": 26, "y": 25 },
+    "624": { "x": 25, "y": 25 },
+    "625": { "x": 25, "y": 25 },
+    "626": { "x": 25, "y": 25 },
+    "627": { "x": 25, "y": 24 },
+    "628": { "x": 25, "y": 24 },
+    "629": { "x": 25, "y": 24 },
+    "630": { "x": 26, "y": 24 },
+    "631": { "x": 26, "y": 24 },
+    "632": { "x": 26, "y": 24 },
+    "633": { "x": 25, "y": 25 },
+    "634": { "x": 25, "y": 25 },
+    "635": { "x": 25, "y": 25 },
+    "636": { "x": 10, "y": 24 },
+    "637": { "x": 15, "y": 24 },
+    "638": { "x": 20, "y": 24 },
+    "648": { "x": 16, "y": 57 },
+    "649": { "x": 18, "y": 57 },
+    "650": { "x": 19, "y": 57 },
+    "651": { "x": 22, "y": 56 },
+    "652": { "x": 21, "y": 56 },
+    "653": { "x": 18, "y": 56 },
+    "654": { "x": 17, "y": 58 },
+    "655": { "x": 22, "y": 58 },
+    "656": { "x": 18, "y": 58 },
+    "657": { "x": 18, "y": 56 },
+    "658": { "x": 19, "y": 56 },
+    "659": { "x": 20, "y": 56 },
+    "660": { "x": 16, "y": 57 },
+    "661": { "x": 18, "y": 57 },
+    "662": { "x": 19, "y": 57 },
+    "663": { "x": 2, "y": 58 },
+    "664": { "x": 5, "y": 58 },
+    "665": { "x": 9, "y": 57 },
+    "675": { "x": 36, "y": 41 },
+    "676": { "x": 36, "y": 40 },
+    "677": { "x": 36, "y": 39 },
+    "678": { "x": 32, "y": 37 },
+    "679": { "x": 33, "y": 36 },
+    "680": { "x": 33, "y": 35 },
+    "681": { "x": 40, "y": 31 },
+    "682": { "x": 37, "y": 31 },
+    "683": { "x": 34, "y": 31 },
+    "684": { "x": 15, "y": 34 },
+    "685": { "x": 14, "y": 35 },
+    "686": { "x": 12, "y": 35 },
+    "687": { "x": 4, "y": 35 },
+    "688": { "x": 4, "y": 36 },
+    "689": { "x": 4, "y": 37 },
+    "690": { "x": 20, "y": 20 },
+    "691": { "x": 19, "y": 20 },
+    "692": { "x": 22, "y": 20 },
+    "702": { "x": 3, "y": 50 },
+    "703": { "x": 3, "y": 49 },
+    "704": { "x": 3, "y": 48 },
+    "705": { "x": 14, "y": 50 },
+    "706": { "x": 18, "y": 49 },
+    "707": { "x": 19, "y": 48 },
+    "708": { "x": 15, "y": 45 },
+    "709": { "x": 17, "y": 44 },
+    "710": { "x": 19, "y": 41 },
+    "711": { "x": 30, "y": 38 },
+    "712": { "x": 30, "y": 39 },
+    "713": { "x": 30, "y": 36 },
+    "714": { "x": 40, "y": 47 },
+    "715": { "x": 40, "y": 44 },
+    "716": { "x": 40, "y": 41 },
+    "729": { "x": 39, "y": 29 },
+    "730": { "x": 40, "y": 28 },
+    "731": { "x": 39, "y": 27 },
+    "732": { "x": 34, "y": 23 },
+    "733": { "x": 28, "y": 26 },
+    "734": { "x": 24, "y": 24 },
+    "735": { "x": 27, "y": 17 },
+    "736": { "x": 22, "y": 18 },
+    "737": { "x": 13, "y": 19 },
+    "738": { "x": 12, "y": 17 },
+    "739": { "x": 8, "y": 19 },
+    "740": { "x": 3, "y": 22 },
+    "741": { "x": 13, "y": 24 },
+    "742": { "x": 14, "y": 28 },
+    "743": { "x": 15, "y": 32 },
+    "756": { "x": 15, "y": 32 },
+    "757": { "x": 14, "y": 36 },
+    "758": { "x": 14, "y": 40 },
+    "759": { "x": 22, "y": 49 },
+    "760": { "x": 25, "y": 44 },
+    "761": { "x": 26, "y": 39 },
+    "762": { "x": 24, "y": 48 },
+    "763": { "x": 29, "y": 40 },
+    "764": { "x": 33, "y": 33 },
+    "765": { "x": 39, "y": 43 },
+    "766": { "x": 43, "y": 38 },
+    "767": { "x": 46, "y": 33 },
+    "768": { "x": 43, "y": 44 },
+    "769": { "x": 44, "y": 36 },
+    "770": { "x": 45, "y": 29 },
+    "771": { "x": 1, "y": 8 },
+    "772": { "x": 31, "y": 9 },
+    "773": { "x": 39, "y": 24 },
+    "783": { "x": 10, "y": 31 },
+    "784": { "x": 9, "y": 39 },
+    "785": { "x": 10, "y": 47 },
+    "786": { "x": 22, "y": 51 },
+    "787": { "x": 25, "y": 43 },
+    "788": { "x": 26, "y": 37 },
+    "789": { "x": 24, "y": 50 },
+    "790": { "x": 29, "y": 41 },
+    "791": { "x": 33, "y": 34 },
+    "792": { "x": 39, "y": 42 },
+    "793": { "x": 43, "y": 38 },
+    "794": { "x": 46, "y": 31 },
+    "795": { "x": 39, "y": 50 },
+    "796": { "x": 39, "y": 39 },
+    "797": { "x": 40, "y": 28 },
+    "798": { "x": 2, "y": 3 },
+    "799": { "x": 31, "y": 5 },
+    "800": { "x": 39, "y": 25 },
+    "810": { "x": 16, "y": 21 },
+    "811": { "x": 15, "y": 21 },
+    "812": { "x": 14, "y": 21 },
+    "813": { "x": 5, "y": 23 },
+    "814": { "x": 13, "y": 22 },
+    "815": { "x": 24, "y": 20 },
+    "816": { "x": 15, "y": 24 },
+    "817": { "x": 27, "y": 21 },
+    "818": { "x": 37, "y": 19 },
+    "819": { "x": 30, "y": 24 },
+    "820": { "x": 39, "y": 21 },
+    "821": { "x": 48, "y": 18 },
+    "822": { "x": 44, "y": 25 },
+    "823": { "x": 43, "y": 22 },
+    "824": { "x": 42, "y": 16 },
+    "825": { "x": 7, "y": 1 },
+    "826": { "x": 20, "y": 5 },
+    "827": { "x": 7, "y": 31 },
+    "837": { "x": 70, "y": 8 },
+    "838": { "x": 69, "y": 10 },
+    "839": { "x": 71, "y": 8 },
+    "840": { "x": 23, "y": 9 },
+    "841": { "x": 24, "y": 12 },
+    "842": { "x": 21, "y": 8 },
+    "843": { "x": 0, "y": 9 },
+    "844": { "x": 0, "y": 9 },
+    "845": { "x": 0, "y": 8 },
+    "846": { "x": 17, "y": 9 },
+    "847": { "x": 17, "y": 14 },
+    "848": { "x": 17, "y": 11 },
+    "849": { "x": 73, "y": 9 },
+    "850": { "x": 72, "y": 10 },
+    "851": { "x": 73, "y": 8 },
+    "852": { "x": 18, "y": 0 },
+    "853": { "x": 15, "y": 5 },
+    "854": { "x": 46, "y": 4 },
+    "864": { "x": 24, "y": 0 },
+    "865": { "x": 22, "y": 2 },
+    "866": { "x": 26, "y": 1 },
+    "867": { "x": 17, "y": 2 },
+    "868": { "x": 28, "y": 3 },
+    "869": { "x": 32, "y": 2 },
+    "870": { "x": 5, "y": 3 },
+    "871": { "x": 0, "y": 4 },
+    "872": { "x": 0, "y": 0 },
+    "873": { "x": 30, "y": 6 },
+    "874": { "x": 17, "y": 4 },
+    "875": { "x": 10, "y": 5 },
+    "876": { "x": 28, "y": 4 },
+    "877": { "x": 31, "y": 3 },
+    "878": { "x": 27, "y": 5 },
+    "879": { "x": 0, "y": 2 },
+    "880": { "x": 4, "y": 14 },
+    "881": { "x": 19, "y": 0 },
+    "891": { "x": 15, "y": 0 },
+    "892": { "x": 13, "y": 3 },
+    "893": { "x": 15, "y": 2 },
+    "894": { "x": 9, "y": 2 },
+    "895": { "x": 9, "y": 6 },
+    "896": { "x": 8, "y": 7 },
+    "897": { "x": 2, "y": 15 },
+    "898": { "x": 2, "y": 15 },
+    "899": { "x": 1, "y": 15 },
+    "900": { "x": 0, "y": 8 },
+    "901": { "x": 12, "y": 7 },
+    "902": { "x": 11, "y": 8 },
+    "903": { "x": 15, "y": 0 },
+    "904": { "x": 14, "y": 0 },
+    "905": { "x": 15, "y": 0 },
+    "906": { "x": 3, "y": 12 },
+    "907": { "x": 3, "y": 6 },
+    "908": { "x": 3, "y": 7 },
+    "918": { "x": 34, "y": 5 },
+    "919": { "x": 32, "y": 6 },
+    "920": { "x": 36, "y": 5 },
+    "921": { "x": 4, "y": 2 },
+    "922": { "x": 5, "y": 2 },
+    "923": { "x": 3, "y": 2 },
+    "924": { "x": 5, "y": 0 },
+    "925": { "x": 4, "y": 0 },
+    "926": { "x": 7, "y": 0 },
+    "927": { "x": 21, "y": 7 },
+    "928": { "x": 20, "y": 4 },
+    "929": { "x": 21, "y": 5 },
+    "930": { "x": 32, "y": 2 },
+    "931": { "x": 34, "y": 3 },
+    "932": { "x": 35, "y": 2 },
+    "933": { "x": 2, "y": 2 },
+    "934": { "x": 1, "y": 0 },
+    "935": { "x": 9, "y": 1 },
+    "945": { "x": 40, "y": 10 },
+    "946": { "x": 40, "y": 10 },
+    "947": { "x": 40, "y": 10 },
+    "948": { "x": 12, "y": 3 },
+    "949": { "x": 12, "y": 3 },
+    "950": { "x": 10, "y": 3 },
+    "951": { "x": 0, "y": 21 },
+    "952": { "x": 0, "y": 21 },
+    "953": { "x": 0, "y": 21 },
+    "954": { "x": 9, "y": 0 },
+    "955": { "x": 9, "y": 2 },
+    "956": { "x": 7, "y": 5 },
+    "957": { "x": 40, "y": 11 },
+    "958": { "x": 40, "y": 11 },
+    "959": { "x": 40, "y": 11 },
+    "960": { "x": 0, "y": 22 },
+    "961": { "x": 0, "y": 22 },
+    "962": { "x": 0, "y": 21 },
+    "972": { "x": 18, "y": 0 },
+    "973": { "x": 18, "y": 0 },
+    "974": { "x": 18, "y": 0 },
+    "975": { "x": 10, "y": 4 },
+    "976": { "x": 12, "y": 4 },
+    "977": { "x": 12, "y": 4 },
+    "978": { "x": 0, "y": 3 },
+    "979": { "x": 0, "y": 3 },
+    "980": { "x": 0, "y": 3 },
+    "981": { "x": 12, "y": 1 },
+    "982": { "x": 12, "y": 1 },
+    "983": { "x": 12, "y": 0 },
+    "984": { "x": 18, "y": 2 },
+    "985": { "x": 18, "y": 1 },
+    "986": { "x": 18, "y": 0 },
+    "999": { "x": 28, "y": 8 },
+    "1000": { "x": 29, "y": 4 },
+    "1001": { "x": 30, "y": 1 },
+    "1002": { "x": 4, "y": 6 },
+    "1003": { "x": 5, "y": 7 },
+    "1004": { "x": 5, "y": 8 },
+    "1005": { "x": 5, "y": 5 },
+    "1006": { "x": 1, "y": 4 },
+    "1007": { "x": 0, "y": 3 },
+    "1008": { "x": 5, "y": 4 },
+    "1009": { "x": 4, "y": 4 },
+    "1010": { "x": 5, "y": 4 },
+    "1011": { "x": 29, "y": 0 },
+    "1012": { "x": 29, "y": 2 },
+    "1013": { "x": 30, "y": 4 },
+    "1014": { "x": 0, "y": 27 },
+    "1015": { "x": 2, "y": 31 },
+    "1016": { "x": 9, "y": 35 },
+    "1026": { "x": 28, "y": 29 },
+    "1027": { "x": 28, "y": 29 },
+    "1028": { "x": 28, "y": 29 },
+    "1029": { "x": 21, "y": 26 },
+    "1030": { "x": 20, "y": 26 },
+    "1031": { "x": 19, "y": 26 },
+    "1032": { "x": 0, "y": 30 },
+    "1033": { "x": 0, "y": 30 },
+    "1034": { "x": 0, "y": 30 },
+    "1035": { "x": 13, "y": 15 },
+    "1036": { "x": 11, "y": 15 },
+    "1037": { "x": 3, "y": 20 },
+    "1038": { "x": 29, "y": 26 },
+    "1039": { "x": 29, "y": 27 },
+    "1040": { "x": 29, "y": 27 },
+    "1041": { "x": 0, "y": 30 },
+    "1042": { "x": 2, "y": 15 },
+    "1043": { "x": 2, "y": 0 },
+    "1053": { "x": 12, "y": 3 },
+    "1054": { "x": 12, "y": 1 },
+    "1055": { "x": 12, "y": 0 },
+    "1056": { "x": 7, "y": 2 },
+    "1057": { "x": 6, "y": 1 },
+    "1058": { "x": 6, "y": 0 },
+    "1059": { "x": 3, "y": 1 },
+    "1060": { "x": 1, "y": 0 },
+    "1061": { "x": 0, "y": 0 },
+    "1062": { "x": 8, "y": 2 },
+    "1063": { "x": 6, "y": 1 },
+    "1064": { "x": 5, "y": 0 },
+    "1065": { "x": 12, "y": 5 },
+    "1066": { "x": 12, "y": 2 },
+    "1067": { "x": 12, "y": 0 },
+    "1068": { "x": 3, "y": 0 },
+    "1069": { "x": 11, "y": 0 },
+    "1070": { "x": 20, "y": 0 },
+    "1080": { "x": 28, "y": 9 },
+    "1081": { "x": 31, "y": 10 },
+    "1082": { "x": 25, "y": 7 },
+    "1083": { "x": 25, "y": 10 },
+    "1084": { "x": 28, "y": 7 },
+    "1085": { "x": 41, "y": 11 },
+    "1086": { "x": 16, "y": 10 },
+    "1087": { "x": 32, "y": 14 },
+    "1088": { "x": 26, "y": 11 },
+    "1089": { "x": 29, "y": 16 },
+    "1090": { "x": 37, "y": 19 },
+    "1091": { "x": 27, "y": 18 },
+    "1092": { "x": 31, "y": 10 },
+    "1093": { "x": 32, "y": 12 },
+    "1094": { "x": 33, "y": 13 },
+    "1095": { "x": 10, "y": 12 },
+    "1096": { "x": 5, "y": 8 },
+    "1097": { "x": 25, "y": 9 },
+    "1107": { "x": 26, "y": 11 },
+    "1108": { "x": 27, "y": 10 },
+    "1109": { "x": 31, "y": 10 },
+    "1110": { "x": 35, "y": 39 },
+    "1111": { "x": 31, "y": 5 },
+    "1112": { "x": 59, "y": 34 },
+    "1113": { "x": 71, "y": 11 },
+    "1114": { "x": 60, "y": 16 },
+    "1115": { "x": 69, "y": 12 },
+    "1116": { "x": 19, "y": 5 },
+    "1117": { "x": 33, "y": 9 },
+    "1118": { "x": 34, "y": 23 },
+    "1119": { "x": 27, "y": 14 },
+    "1120": { "x": 28, "y": 12 },
+    "1121": { "x": 32, "y": 12 },
+    "1122": { "x": 12, "y": 40 },
+    "1123": { "x": 14, "y": 12 },
+    "1124": { "x": 20, "y": 19 },
+    "1125": { "x": 22, "y": 0 },
+    "1126": { "x": 22, "y": 1 },
+    "1127": { "x": 52, "y": 19 },
+    "1128": { "x": 60, "y": 3 },
+    "1129": { "x": 48, "y": 8 },
+    "1130": { "x": 55, "y": 5 },
+    "1131": { "x": 26, "y": 30 },
+    "1132": { "x": 51, "y": 4 },
+    "1133": { "x": 53, "y": 14 },
+    "1134": { "x": 31, "y": 28 },
+    "1135": { "x": 33, "y": 26 },
+    "1136": { "x": 30, "y": 28 },
+    "1137": { "x": 29, "y": 26 },
+    "1138": { "x": 29, "y": 27 },
+    "1139": { "x": 18, "y": 29 },
+    "1140": { "x": 8, "y": 27 },
+    "1141": { "x": 27, "y": 28 },
+    "1142": { "x": 3, "y": 27 },
+    "1143": { "x": 20, "y": 30 },
+    "1144": { "x": 31, "y": 32 },
+    "1145": { "x": 28, "y": 29 },
+    "1146": { "x": 33, "y": 27 },
+    "1147": { "x": 33, "y": 28 },
+    "1148": { "x": 32, "y": 29 },
+    "1149": { "x": 12, "y": 31 },
+    "1150": { "x": 24, "y": 22 },
+    "1151": { "x": 26, "y": 34 },
+    "1161": { "x": 27, "y": 33 },
+    "1162": { "x": 32, "y": 28 },
+    "1163": { "x": 28, "y": 23 },
+    "1164": { "x": 64, "y": 42 },
+    "1165": { "x": 47, "y": 46 },
+    "1166": { "x": 12, "y": 74 },
+    "1167": { "x": 9, "y": 83 },
+    "1168": { "x": 80, "y": 31 },
+    "1169": { "x": 78, "y": 37 },
+    "1170": { "x": 69, "y": 30 },
+    "1171": { "x": 75, "y": 35 },
+    "1172": { "x": 69, "y": 40 },
+    "1173": { "x": 56, "y": 24 },
+    "1174": { "x": 58, "y": 30 },
+    "1175": { "x": 64, "y": 32 },
+    "1176": { "x": 3, "y": 59 },
+    "1177": { "x": 13, "y": 0 },
+    "1178": { "x": 10, "y": 7 },
+    "1179": { "x": 52, "y": 71 },
+    "1180": { "x": 74, "y": 35 },
+    "1181": { "x": 61, "y": 32 },
+    "1182": { "x": 75, "y": 53 },
+    "1183": { "x": 72, "y": 24 },
+    "1184": { "x": 0, "y": 83 },
+    "1185": { "x": 55, "y": 32 },
+    "1186": { "x": 63, "y": 30 },
+    "1187": { "x": 54, "y": 37 },
+    "1188": { "x": 28, "y": 16 },
+    "1189": { "x": 24, "y": 18 },
+    "1190": { "x": 28, "y": 21 },
+    "1191": { "x": 17, "y": 18 },
+    "1192": { "x": 12, "y": 16 },
+    "1193": { "x": 22, "y": 18 },
+    "1194": { "x": 15, "y": 16 },
+    "1195": { "x": 6, "y": 17 },
+    "1196": { "x": 10, "y": 17 },
+    "1197": { "x": 23, "y": 16 },
+    "1198": { "x": 21, "y": 19 },
+    "1199": { "x": 22, "y": 23 },
+    "1200": { "x": 37, "y": 17 },
+    "1201": { "x": 32, "y": 19 },
+    "1202": { "x": 33, "y": 18 },
+    "1203": { "x": 19, "y": 0 },
+    "1204": { "x": 0, "y": 5 },
+    "1205": { "x": 11, "y": 0 },
+    "1215": { "x": 2, "y": 16 },
+    "1216": { "x": 0, "y": 13 },
+    "1217": { "x": 13, "y": 0 },
+    "1218": { "x": 8, "y": 20 },
+    "1219": { "x": 2, "y": 13 },
+    "1220": { "x": 9, "y": 6 },
+    "1221": { "x": 37, "y": 21 },
+    "1222": { "x": 24, "y": 8 },
+    "1223": { "x": 31, "y": 0 },
+    "1224": { "x": 22, "y": 10 },
+    "1225": { "x": 29, "y": 5 },
+    "1226": { "x": 38, "y": 0 },
+    "1227": { "x": 1, "y": 14 },
+    "1228": { "x": 1, "y": 10 },
+    "1229": { "x": 13, "y": 0 },
+    "1230": { "x": 0, "y": 4 },
+    "1231": { "x": 28, "y": 8 },
+    "1232": { "x": 30, "y": 3 },
+    "1242": { "x": 41, "y": 29 },
+    "1243": { "x": 41, "y": 32 },
+    "1244": { "x": 43, "y": 30 },
+    "1245": { "x": 24, "y": 32 },
+    "1246": { "x": 39, "y": 36 },
+    "1247": { "x": 38, "y": 34 },
+    "1248": { "x": 30, "y": 35 },
+    "1249": { "x": 44, "y": 34 },
+    "1250": { "x": 38, "y": 31 },
+    "1251": { "x": 40, "y": 33 },
+    "1252": { "x": 32, "y": 34 },
+    "1253": { "x": 26, "y": 33 },
+    "1254": { "x": 37, "y": 28 },
+    "1255": { "x": 37, "y": 30 },
+    "1256": { "x": 31, "y": 30 },
+    "1257": { "x": 34, "y": 34 },
+    "1258": { "x": 27, "y": 36 },
+    "1259": { "x": 19, "y": 33 },
+    "1269": { "x": 35, "y": 29 },
+    "1270": { "x": 29, "y": 5 },
+    "1271": { "x": 10, "y": 23 },
+    "1272": { "x": 9, "y": 81 },
+    "1273": { "x": 41, "y": 13 },
+    "1274": { "x": 42, "y": 4 },
+    "1275": { "x": 63, "y": 0 },
+    "1276": { "x": 70, "y": 7 },
+    "1277": { "x": 2, "y": 61 },
+    "1278": { "x": 61, "y": 19 },
+    "1279": { "x": 81, "y": 8 },
+    "1280": { "x": 59, "y": 1 },
+    "1281": { "x": 40, "y": 43 },
+    "1282": { "x": 74, "y": 5 },
+    "1283": { "x": 38, "y": 29 },
+    "1284": { "x": 0, "y": 20 },
+    "1285": { "x": 2, "y": 51 },
+    "1286": { "x": 27, "y": 54 },
+    "1287": { "x": 58, "y": 0 },
+    "1288": { "x": 76, "y": 7 },
+    "1289": { "x": 80, "y": 44 },
+    "1290": { "x": 1, "y": 65 },
+    "1291": { "x": 77, "y": 9 },
+    "1292": { "x": 46, "y": 10 },
+    "1293": { "x": 66, "y": 3 },
+    "1294": { "x": 45, "y": 5 },
+    "1295": { "x": 10, "y": 61 },
+    "1296": { "x": 38, "y": 13 },
+    "1297": { "x": 37, "y": 16 },
+    "1298": { "x": 33, "y": 9 },
+    "1299": { "x": 32, "y": 0 },
+    "1300": { "x": 26, "y": 0 },
+    "1301": { "x": 23, "y": 1 },
+    "1302": { "x": 21, "y": 17 },
+    "1303": { "x": 19, "y": 16 },
+    "1304": { "x": 17, "y": 16 },
+    "1305": { "x": 15, "y": 19 },
+    "1306": { "x": 19, "y": 21 },
+    "1307": { "x": 19, "y": 29 },
+    "1308": { "x": 46, "y": 9 },
+    "1309": { "x": 35, "y": 8 },
+    "1310": { "x": 39, "y": 8 },
+    "1311": { "x": 40, "y": 12 },
+    "1312": { "x": 0, "y": 10 },
+    "1313": { "x": 35, "y": 21 },
+    "1323": { "x": 62, "y": 20 },
+    "1324": { "x": 56, "y": 42 },
+    "1325": { "x": 21, "y": 21 },
+    "1326": { "x": 11, "y": 46 },
+    "1327": { "x": 2, "y": 45 },
+    "1328": { "x": 3, "y": 44 },
+    "1329": { "x": 12, "y": 62 },
+    "1330": { "x": 2, "y": 59 },
+    "1331": { "x": 1, "y": 62 },
+    "1332": { "x": 50, "y": 70 },
+    "1333": { "x": 36, "y": 51 },
+    "1334": { "x": 40, "y": 54 },
+    "1335": { "x": 45, "y": 39 },
+    "1336": { "x": 41, "y": 36 },
+    "1337": { "x": 37, "y": 39 },
+    "1338": { "x": 18, "y": 58 },
+    "1339": { "x": 3, "y": 0 },
+    "1340": { "x": 19, "y": 0 },
+    "1350": { "x": 35, "y": 24 },
+    "1351": { "x": 36, "y": 25 },
+    "1352": { "x": 31, "y": 24 },
+    "1353": { "x": 31, "y": 22 },
+    "1354": { "x": 25, "y": 23 },
+    "1355": { "x": 16, "y": 24 },
+    "1356": { "x": 6, "y": 16 },
+    "1357": { "x": 0, "y": 17 },
+    "1358": { "x": 9, "y": 17 },
+    "1359": { "x": 10, "y": 1 },
+    "1360": { "x": 22, "y": 2 },
+    "1361": { "x": 29, "y": 2 },
+    "1362": { "x": 29, "y": 0 },
+    "1363": { "x": 36, "y": 1 },
+    "1364": { "x": 36, "y": 0 },
+    "1365": { "x": 0, "y": 26 },
+    "1366": { "x": 0, "y": 28 },
+    "1367": { "x": 0, "y": 37 },
+    "1377": { "x": 24, "y": 5 },
+    "1378": { "x": 24, "y": 5 },
+    "1379": { "x": 24, "y": 5 },
+    "1380": { "x": 22, "y": 3 },
+    "1381": { "x": 22, "y": 3 },
+    "1382": { "x": 22, "y": 3 },
+    "1383": { "x": 23, "y": 2 },
+    "1384": { "x": 23, "y": 2 },
+    "1385": { "x": 23, "y": 2 },
+    "1386": { "x": 23, "y": 4 },
+    "1387": { "x": 23, "y": 4 },
+    "1388": { "x": 23, "y": 4 },
+    "1389": { "x": 24, "y": 5 },
+    "1390": { "x": 24, "y": 5 },
+    "1391": { "x": 24, "y": 5 },
+    "1392": { "x": 7, "y": 2 },
+    "1393": { "x": 12, "y": 2 },
+    "1394": { "x": 18, "y": 2 },
+    "1404": { "x": 25, "y": 13 },
+    "1405": { "x": 25, "y": 13 },
+    "1406": { "x": 25, "y": 13 },
+    "1407": { "x": 23, "y": 13 },
+    "1408": { "x": 23, "y": 13 },
+    "1409": { "x": 23, "y": 13 },
+    "1410": { "x": 24, "y": 12 },
+    "1411": { "x": 24, "y": 12 },
+    "1412": { "x": 24, "y": 12 },
+    "1413": { "x": 23, "y": 13 },
+    "1414": { "x": 23, "y": 13 },
+    "1415": { "x": 23, "y": 13 },
+    "1416": { "x": 25, "y": 13 },
+    "1417": { "x": 25, "y": 13 },
+    "1418": { "x": 25, "y": 13 },
+    "1419": { "x": 9, "y": 12 },
+    "1420": { "x": 14, "y": 12 },
+    "1421": { "x": 20, "y": 12 },
+    "1422": { "x": 23, "y": 13 },
+    "1423": { "x": 23, "y": 13 },
+    "1424": { "x": 23, "y": 13 },
+    "1425": { "x": 24, "y": 12 },
+    "1426": { "x": 24, "y": 12 },
+    "1427": { "x": 24, "y": 12 },
+    "1428": { "x": 23, "y": 13 },
+    "1429": { "x": 23, "y": 13 },
+    "1430": { "x": 23, "y": 13 },
+    "1431": { "x": 23, "y": 9 },
+    "1432": { "x": 23, "y": 9 },
+    "1433": { "x": 23, "y": 9 },
+    "1434": { "x": 21, "y": 9 },
+    "1435": { "x": 21, "y": 9 },
+    "1436": { "x": 21, "y": 9 },
+    "1437": { "x": 22, "y": 9 },
+    "1438": { "x": 22, "y": 9 },
+    "1439": { "x": 22, "y": 9 },
+    "1440": { "x": 23, "y": 9 },
+    "1441": { "x": 23, "y": 9 },
+    "1442": { "x": 23, "y": 9 },
+    "1443": { "x": 25, "y": 9 },
+    "1444": { "x": 25, "y": 9 },
+    "1445": { "x": 25, "y": 9 },
+    "1446": { "x": 7, "y": 9 },
+    "1447": { "x": 12, "y": 9 },
+    "1448": { "x": 18, "y": 9 },
+    "1458": { "x": 16, "y": 16 },
+    "1459": { "x": 15, "y": 16 },
+    "1460": { "x": 14, "y": 16 },
+    "1461": { "x": 9, "y": 20 },
+    "1462": { "x": 11, "y": 20 },
+    "1463": { "x": 25, "y": 14 },
+    "1464": { "x": 18, "y": 19 },
+    "1465": { "x": 26, "y": 18 },
+    "1466": { "x": 38, "y": 14 },
+    "1467": { "x": 33, "y": 20 },
+    "1468": { "x": 38, "y": 18 },
+    "1469": { "x": 49, "y": 13 },
+    "1470": { "x": 44, "y": 20 },
+    "1471": { "x": 44, "y": 17 },
+    "1472": { "x": 44, "y": 11 },
+    "1473": { "x": 7, "y": 0 },
+    "1474": { "x": 23, "y": 3 },
+    "1475": { "x": 0, "y": 37 },
+    "1485": { "x": 20, "y": 9 },
+    "1486": { "x": 20, "y": 9 },
+    "1487": { "x": 20, "y": 9 },
+    "1488": { "x": 23, "y": 9 },
+    "1489": { "x": 23, "y": 9 },
+    "1490": { "x": 23, "y": 8 },
+    "1491": { "x": 22, "y": 9 },
+    "1492": { "x": 22, "y": 9 },
+    "1493": { "x": 22, "y": 9 },
+    "1494": { "x": 23, "y": 9 },
+    "1495": { "x": 23, "y": 9 },
+    "1496": { "x": 23, "y": 9 },
+    "1497": { "x": 22, "y": 9 },
+    "1498": { "x": 22, "y": 9 },
+    "1499": { "x": 22, "y": 9 },
+    "1500": { "x": 7, "y": 9 },
+    "1501": { "x": 12, "y": 9 },
+    "1502": { "x": 18, "y": 9 },
+    "1512": { "x": 21, "y": 0 },
+    "1513": { "x": 21, "y": 0 },
+    "1514": { "x": 21, "y": 0 },
+    "1515": { "x": 19, "y": 0 },
+    "1516": { "x": 19, "y": 0 },
+    "1517": { "x": 19, "y": 0 },
+    "1518": { "x": 20, "y": 0 },
+    "1519": { "x": 20, "y": 0 },
+    "1520": { "x": 20, "y": 0 },
+    "1521": { "x": 20, "y": 0 },
+    "1522": { "x": 20, "y": 0 },
+    "1523": { "x": 20, "y": 0 },
+    "1524": { "x": 21, "y": 0 },
+    "1525": { "x": 21, "y": 0 },
+    "1526": { "x": 21, "y": 0 },
+    "1527": { "x": 5, "y": 0 },
+    "1528": { "x": 10, "y": 0 },
+    "1529": { "x": 16, "y": 0 },
+    "1539": { "x": 12, "y": 21 },
+    "1540": { "x": 11, "y": 21 },
+    "1541": { "x": 10, "y": 21 },
+    "1542": { "x": 5, "y": 23 },
+    "1543": { "x": 13, "y": 22 },
+    "1544": { "x": 20, "y": 20 },
+    "1545": { "x": 15, "y": 24 },
+    "1546": { "x": 27, "y": 21 },
+    "1547": { "x": 33, "y": 19 },
+    "1548": { "x": 30, "y": 23 },
+    "1549": { "x": 39, "y": 21 },
+    "1550": { "x": 44, "y": 18 },
+    "1551": { "x": 40, "y": 25 },
+    "1552": { "x": 39, "y": 22 },
+    "1553": { "x": 39, "y": 16 },
+    "1554": { "x": 4, "y": 1 },
+    "1555": { "x": 20, "y": 5 },
+    "1556": { "x": 7, "y": 29 },
+    "1566": { "x": 28, "y": 28 },
+    "1567": { "x": 30, "y": 26 },
+    "1568": { "x": 28, "y": 28 },
+    "1569": { "x": 27, "y": 26 },
+    "1570": { "x": 27, "y": 27 },
+    "1571": { "x": 16, "y": 29 },
+    "1572": { "x": 4, "y": 27 },
+    "1573": { "x": 22, "y": 27 },
+    "1574": { "x": 0, "y": 27 },
+    "1575": { "x": 17, "y": 30 },
+    "1576": { "x": 31, "y": 32 },
+    "1577": { "x": 26, "y": 30 },
+    "1578": { "x": 32, "y": 27 },
+    "1579": { "x": 31, "y": 27 },
+    "1580": { "x": 32, "y": 29 },
+    "1581": { "x": 8, "y": 31 },
+    "1582": { "x": 22, "y": 19 },
+    "1583": { "x": 23, "y": 29 },
+    "1593": { "x": 17, "y": 0 },
+    "1594": { "x": 17, "y": 0 },
+    "1595": { "x": 17, "y": 0 },
+    "1596": { "x": 20, "y": 0 },
+    "1597": { "x": 20, "y": 0 },
+    "1598": { "x": 20, "y": 0 },
+    "1599": { "x": 24, "y": 0 },
+    "1600": { "x": 24, "y": 0 },
+    "1601": { "x": 24, "y": 0 },
+    "1602": { "x": 21, "y": 0 },
+    "1603": { "x": 21, "y": 0 },
+    "1604": { "x": 21, "y": 0 },
+    "1605": { "x": 17, "y": 1 },
+    "1606": { "x": 17, "y": 1 },
+    "1607": { "x": 17, "y": 1 },
+    "1608": { "x": 9, "y": 0 },
+    "1609": { "x": 14, "y": 0 },
+    "1610": { "x": 20, "y": 0 },
+    "1620": { "x": 13, "y": 16 },
+    "1621": { "x": 12, "y": 16 },
+    "1622": { "x": 11, "y": 16 },
+    "1623": { "x": 7, "y": 20 },
+    "1624": { "x": 9, "y": 20 },
+    "1625": { "x": 22, "y": 14 },
+    "1626": { "x": 18, "y": 19 },
+    "1627": { "x": 24, "y": 18 },
+    "1628": { "x": 35, "y": 14 },
+    "1629": { "x": 31, "y": 20 },
+    "1630": { "x": 36, "y": 18 },
+    "1631": { "x": 46, "y": 13 },
+    "1632": { "x": 41, "y": 20 },
+    "1633": { "x": 41, "y": 17 },
+    "1634": { "x": 41, "y": 11 },
+    "1635": { "x": 3, "y": 0 },
+    "1636": { "x": 22, "y": 0 },
+    "1637": { "x": 0, "y": 24 },
+    "1647": { "x": 16, "y": 20 },
+    "1648": { "x": 15, "y": 20 },
+    "1649": { "x": 14, "y": 20 },
+    "1650": { "x": 5, "y": 23 },
+    "1651": { "x": 13, "y": 22 },
+    "1652": { "x": 24, "y": 19 },
+    "1653": { "x": 15, "y": 24 },
+    "1654": { "x": 27, "y": 21 },
+    "1655": { "x": 37, "y": 18 },
+    "1656": { "x": 30, "y": 24 },
+    "1657": { "x": 39, "y": 19 },
+    "1658": { "x": 48, "y": 15 },
+    "1659": { "x": 44, "y": 25 },
+    "1660": { "x": 43, "y": 22 },
+    "1661": { "x": 42, "y": 15 },
+    "1662": { "x": 7, "y": 0 },
+    "1663": { "x": 20, "y": 5 },
+    "1664": { "x": 7, "y": 31 },
+    "1674": { "x": 15, "y": 32 },
+    "1675": { "x": 14, "y": 36 },
+    "1676": { "x": 14, "y": 40 },
+    "1677": { "x": 22, "y": 49 },
+    "1678": { "x": 25, "y": 44 },
+    "1679": { "x": 26, "y": 39 },
+    "1680": { "x": 24, "y": 48 },
+    "1681": { "x": 29, "y": 40 },
+    "1682": { "x": 33, "y": 33 },
+    "1683": { "x": 39, "y": 43 },
+    "1684": { "x": 43, "y": 38 },
+    "1685": { "x": 46, "y": 33 },
+    "1686": { "x": 43, "y": 44 },
+    "1687": { "x": 44, "y": 36 },
+    "1688": { "x": 45, "y": 29 },
+    "1689": { "x": 1, "y": 8 },
+    "1690": { "x": 31, "y": 9 },
+    "1691": { "x": 39, "y": 24 },
+    "2000": { "x": 0, "y": 0 },
+    "2001": { "x": 0, "y": 0 },
+    "2002": { "x": 89, "y": 0 },
+    "2003": { "x": 48, "y": 0 },
+    "2004": { "x": 48, "y": 0 },
+    "2005": { "x": 48, "y": 0 },
+    "2006": { "x": 48, "y": 0 },
+    "2009": { "x": 0, "y": 0 },
+    "2010": { "x": 22, "y": 2 },
+    "2011": { "x": 0, "y": 0 },
+    "2012": { "x": 0, "y": 0 },
+    "2013": { "x": 1, "y": 1 },
+    "2014": { "x": 3, "y": 3 },
+    "2015": { "x": 1, "y": 1 },
+    "2016": { "x": 1, "y": 1 },
+    "2017": { "x": 1, "y": 1 },
+    "2018": { "x": 3, "y": 3 },
+    "2019": { "x": 1, "y": 1 },
+    "2020": { "x": 1, "y": 1 },
+    "2021": { "x": 1, "y": 1 },
+    "2022": { "x": 0, "y": 0 },
+    "2023": { "x": 0, "y": 0 },
+    "2024": { "x": 0, "y": 0 },
+    "2025": { "x": 0, "y": 0 },
+    "2026": { "x": 0, "y": 0 },
+    "2100": { "x": 0, "y": 0 },
+    "2101": { "x": 0, "y": 0 },
+    "2102": { "x": 0, "y": 0 },
+    "2103": { "x": 0, "y": 0 },
+    "2104": { "x": 0, "y": 0 },
+    "2105": { "x": 0, "y": 0 },
+    "2106": { "x": 0, "y": 0 },
+    "2107": { "x": 0, "y": 0 },
+    "2150": { "x": 6, "y": 4 },
+    "2151": { "x": 4, "y": 4 },
+    "2152": { "x": 3, "y": 3 },
+    "2153": { "x": 0, "y": 5 },
+    "2154": { "x": 4, "y": 4 },
+    "2155": { "x": 14, "y": 6 },
+    "2156": { "x": 8, "y": 8 },
+    "2157": { "x": 7, "y": 7 },
+    "2158": { "x": 4, "y": 1 },
+    "2159": { "x": 0, "y": 5 },
+    "2160": { "x": 16, "y": 10 },
+    "2161": { "x": 2, "y": 8 },
+    "2162": { "x": 3, "y": 4 },
+    "2163": { "x": 6, "y": 5 },
+    "2164": { "x": 3, "y": 1 },
+    "2165": { "x": 7, "y": 3 },
+    "2166": { "x": 11, "y": 7 },
+    "2167": { "x": 13, "y": 7 },
+    "2168": { "x": 8, "y": 5 },
+    "2169": { "x": 16, "y": 7 },
+    "2170": { "x": 4, "y": 2 },
+    "2171": { "x": 20, "y": 9 },
+    "2172": { "x": 13, "y": 0 },
+    "2173": { "x": 0, "y": 10 },
+    "2174": { "x": 1, "y": 9 },
+    "2175": { "x": 10, "y": 12 },
+    "2176": { "x": 9, "y": 1 },
+    "2177": { "x": 10, "y": 8 },
+    "2178": { "x": 8, "y": 0 },
+    "2179": { "x": 4, "y": 3 },
+    "2180": { "x": 13, "y": 4 },
+    "2181": { "x": 13, "y": 4 },
+    "2182": { "x": 13, "y": 4 },
+    "2183": { "x": 13, "y": 4 },
+    "2184": { "x": 13, "y": 4 },
+    "2185": { "x": 13, "y": 4 },
+    "2186": { "x": 13, "y": 4 },
+    "2187": { "x": 13, "y": 4 },
+    "2188": { "x": 13, "y": 5 },
+    "2189": { "x": 13, "y": 4 },
+    "2190": { "x": 13, "y": 4 },
+    "2191": { "x": 13, "y": 4 },
+    "2192": { "x": 16, "y": 6 },
+    "2193": { "x": 14, "y": 3 },
+    "2194": { "x": 9, "y": 1 },
+    "2195": { "x": 13, "y": 4 },
+    "2196": { "x": 11, "y": 4 },
+    "2197": { "x": 14, "y": 4 },
+    "2198": { "x": 20, "y": 0 },
+    "2199": { "x": 7, "y": 4 },
+    "2200": { "x": 5, "y": 5 },
+    "2201": { "x": 16, "y": 3 },
+    "2202": { "x": 17, "y": 1 },
+    "2203": { "x": 8, "y": 10 },
+    "2204": { "x": 5, "y": 6 },
+    "2205": { "x": 6, "y": 8 },
+    "2206": { "x": 12, "y": 6 },
+    "2207": { "x": 6, "y": 5 },
+    "2208": { "x": 2, "y": 4 },
+    "2209": { "x": 2, "y": 2 },
+    "2210": { "x": 6, "y": 5 },
+    "2211": { "x": 11, "y": 2 },
+    "2212": { "x": 11, "y": 2 },
+    "2213": { "x": 8, "y": 7 },
+    "2214": { "x": 7, "y": 4 },
+    "2215": { "x": 11, "y": 4 },
+    "2216": { "x": 2, "y": 5 },
+    "2217": { "x": 5, "y": 6 },
+    "2218": { "x": 6, "y": 5 },
+    "2219": { "x": 6, "y": 5 },
+    "2220": { "x": 8, "y": 5 },
+    "2221": { "x": 8, "y": 5 },
+    "2222": { "x": 2, "y": 2 },
+    "2223": { "x": 15, "y": 7 },
+    "2224": { "x": 14, "y": 4 },
+    "2225": { "x": 7, "y": 8 },
+    "2226": { "x": 7, "y": 6 },
+    "2227": { "x": 10, "y": 5 },
+    "2228": { "x": 6, "y": 2 },
+    "2229": { "x": 4, "y": 8 },
+    "2230": { "x": 10, "y": 8 },
+    "2231": { "x": 2, "y": 2 },
+    "2232": { "x": 1, "y": 5 },
+    "2233": { "x": 3, "y": 2 },
+    "2234": { "x": 5, "y": 1 },
+    "2235": { "x": 8, "y": 4 },
+    "2236": { "x": 12, "y": 5 },
+    "2237": { "x": 3, "y": 1 },
+    "2238": { "x": 4, "y": 2 },
+    "2239": { "x": 15, "y": 6 },
+    "2240": { "x": 8, "y": 5 },
+    "2241": { "x": 6, "y": 2 },
+    "2242": { "x": 3, "y": 0 },
+    "2243": { "x": 7, "y": 4 },
+    "2244": { "x": 2, "y": 12 },
+    "2245": { "x": 6, "y": 11 },
+    "2246": { "x": 6, "y": 0 },
+    "2247": { "x": 7, "y": 3 },
+    "2248": { "x": 9, "y": 3 },
+    "2249": { "x": 16, "y": 2 },
+    "2250": { "x": 9, "y": 16 },
+    "2251": { "x": 4, "y": 9 },
+    "2252": { "x": 16, "y": 18 },
+    "2253": { "x": 14, "y": 3 },
+    "2254": { "x": 10, "y": 1 },
+    "2255": { "x": 9, "y": 10 },
+    "2256": { "x": 5, "y": 6 },
+    "2257": { "x": 10, "y": 9 },
+    "2258": { "x": 9, "y": 2 },
+    "2259": { "x": 14, "y": 3 },
+    "2260": { "x": 3, "y": 7 },
+    "2261": { "x": 2, "y": 7 },
+    "2262": { "x": 7, "y": 8 },
+    "2263": { "x": 8, "y": 8 },
+    "2264": { "x": 3, "y": 1 },
+    "2265": { "x": 6, "y": 8 },
+    "2266": { "x": 18, "y": 14 },
+    "2267": { "x": 7, "y": 19 },
+    "2268": { "x": 1, "y": 5 },
+    "2269": { "x": 7, "y": 6 },
+    "2270": { "x": 5, "y": 3 },
+    "2271": { "x": 4, "y": 10 },
+    "2272": { "x": 4, "y": 2 },
+    "2273": { "x": 14, "y": 5 },
+    "2274": { "x": 8, "y": 0 },
+    "2275": { "x": 6, "y": 7 },
+    "2276": { "x": 22, "y": 9 },
+    "2277": { "x": 13, "y": 2 },
+    "2278": { "x": 6, "y": 2 },
+    "2279": { "x": 6, "y": 3 },
+    "2280": { "x": 3, "y": 2 },
+    "2281": { "x": 11, "y": 1 },
+    "2282": { "x": 3, "y": 1 },
+    "2283": { "x": 12, "y": 1 },
+    "2284": { "x": 7, "y": 13 },
+    "2285": { "x": 5, "y": 0 },
+    "2286": { "x": 23, "y": 12 },
+    "2287": { "x": 1, "y": 0 },
+    "2288": { "x": 6, "y": 3 },
+    "2289": { "x": 7, "y": 8 },
+    "2290": { "x": 12, "y": 6 },
+    "2291": { "x": 9, "y": 6 },
+    "2292": { "x": 1, "y": 18 },
+    "2293": { "x": 6, "y": 8 },
+    "2294": { "x": 7, "y": 0 },
+    "2295": { "x": 6, "y": 8 },
+    "2296": { "x": 0, "y": 7 },
+    "2297": { "x": 6, "y": 11 },
+    "2298": { "x": 11, "y": 10 },
+    "2299": { "x": 15, "y": 5 },
+    "2300": { "x": 5, "y": 2 },
+    "2301": { "x": 17, "y": 7 },
+    "2302": { "x": 4, "y": 2 },
+    "2303": { "x": 4, "y": 2 },
+    "2304": { "x": 4, "y": 2 },
+    "2305": { "x": 4, "y": 2 },
+    "2306": { "x": 6, "y": 4 },
+    "2307": { "x": 6, "y": 1 },
+    "2308": { "x": 6, "y": 1 },
+    "2309": { "x": 14, "y": 8 },
+    "2310": { "x": 7, "y": 4 },
+    "2311": { "x": 8, "y": 2 },
+    "2312": { "x": 8, "y": 2 },
+    "2313": { "x": 12, "y": 4 },
+    "2314": { "x": 6, "y": 3 },
+    "2315": { "x": 1, "y": 2 },
+    "2316": { "x": 1, "y": 7 },
+    "2317": { "x": 1, "y": 2 },
+    "2318": { "x": 0, "y": 2 },
+    "2319": { "x": 2, "y": 0 },
+    "2320": { "x": 2, "y": 2 },
+    "2321": { "x": 5, "y": 2 },
+    "2322": { "x": 2, "y": 2 },
+    "2323": { "x": 2, "y": 1 },
+    "2324": { "x": 5, "y": 3 },
+    "2325": { "x": 9, "y": 6 },
+    "2326": { "x": 7, "y": 7 },
+    "2327": { "x": 5, "y": 5 },
+    "2328": { "x": 5, "y": 5 },
+    "2329": { "x": 11, "y": 4 },
+    "2330": { "x": 8, "y": 2 },
+    "2331": { "x": 9, "y": 12 },
+    "2332": { "x": 13, "y": 7 },
+    "2333": { "x": 10, "y": 1 },
+    "2334": { "x": 8, "y": 1 },
+    "2335": { "x": 3, "y": 0 },
+    "2336": { "x": 1, "y": 0 },
+    "2337": { "x": 5, "y": 2 },
+    "2338": { "x": 5, "y": 4 },
+    "2339": { "x": 19, "y": 10 },
+    "2340": { "x": 1, "y": 3 },
+    "2341": { "x": 12, "y": 3 },
+    "2342": { "x": 14, "y": 1 },
+    "2343": { "x": 12, "y": 11 },
+    "2344": { "x": 1, "y": 8 },
+    "2345": { "x": 14, "y": 8 },
+    "2346": { "x": 19, "y": 4 },
+    "2347": { "x": 12, "y": 7 },
+    "2348": { "x": 5, "y": 10 },
+    "2349": { "x": 19, "y": 11 },
+    "2350": { "x": 5, "y": 6 },
+    "2351": { "x": 5, "y": 5 },
+    "2352": { "x": 1, "y": 11 },
+    "2353": { "x": 11, "y": 7 },
+    "2354": { "x": 4, "y": 12 },
+    "2355": { "x": 2, "y": 8 },
+    "2356": { "x": 2, "y": 8 },
+    "2357": { "x": 9, "y": 5 },
+    "2358": { "x": 7, "y": 4 },
+    "2359": { "x": 1, "y": 0 },
+    "2360": { "x": 8, "y": 0 },
+    "2361": { "x": 12, "y": 1 },
+    "2362": { "x": 7, "y": 1 },
+    "2363": { "x": 2, "y": 2 },
+    "2364": { "x": 3, "y": 9 },
+    "2365": { "x": 4, "y": 3 },
+    "2366": { "x": 5, "y": 2 },
+    "2367": { "x": 5, "y": 1 },
+    "2368": { "x": 10, "y": 1 },
+    "2369": { "x": 17, "y": 3 },
+    "2370": { "x": 5, "y": 6 },
+    "2371": { "x": 9, "y": 3 },
+    "2372": { "x": 7, "y": 3 },
+    "2373": { "x": 3, "y": 2 },
+    "2374": { "x": 0, "y": 6 },
+    "2375": { "x": 10, "y": 6 },
+    "2376": { "x": 1, "y": 7 },
+    "2377": { "x": 12, "y": 11 },
+    "2378": { "x": 9, "y": 3 },
+    "2379": { "x": 16, "y": 2 },
+    "2380": { "x": 11, "y": 12 },
+    "2381": { "x": 22, "y": 5 },
+    "2382": { "x": 6, "y": 2 },
+    "2383": { "x": 11, "y": 1 },
+    "2384": { "x": 0, "y": 2 },
+    "2385": { "x": 8, "y": 6 },
+    "2386": { "x": 9, "y": 4 },
+    "2387": { "x": 4, "y": 4 },
+    "2388": { "x": 8, "y": 0 },
+    "2389": { "x": 2, "y": 0 },
+    "2390": { "x": 9, "y": 4 },
+    "2391": { "x": 3, "y": 5 },
+    "2392": { "x": 9, "y": 4 },
+    "2393": { "x": 8, "y": 5 },
+    "2394": { "x": 2, "y": 1 },
+    "2395": { "x": 3, "y": 2 },
+    "2396": { "x": 8, "y": 3 },
+    "2397": { "x": 2, "y": 3 },
+    "2398": { "x": 6, "y": 2 },
+    "2399": { "x": 2, "y": 6 },
+    "2400": { "x": 5, "y": 2 },
+    "2401": { "x": 3, "y": 3 },
+    "2402": { "x": 3, "y": 3 },
+    "2403": { "x": 7, "y": 1 },
+    "2404": { "x": 2, "y": 6 },
+    "2405": { "x": 7, "y": 10 },
+    "2406": { "x": 5, "y": 4 },
+    "2407": { "x": 2, "y": 2 },
+    "2408": { "x": 0, "y": 0 },
+    "2409": { "x": 2, "y": 5 },
+    "2410": { "x": 3, "y": 2 },
+    "2411": { "x": 5, "y": 3 },
+    "2412": { "x": 2, "y": 4 },
+    "2413": { "x": 3, "y": 4 },
+    "2414": { "x": 10, "y": 3 },
+    "2415": { "x": 2, "y": 2 },
+    "2416": { "x": 1, "y": 4 },
+    "2417": { "x": 0, "y": 3 },
+    "2418": { "x": 3, "y": 3 },
+    "2419": { "x": 11, "y": 7 },
+    "2420": { "x": 5, "y": 6 },
+    "2421": { "x": 8, "y": 5 },
+    "2422": { "x": 5, "y": 1 },
+    "2423": { "x": 2, "y": 6 },
+    "2424": { "x": 5, "y": 5 },
+    "2425": { "x": 6, "y": 5 },
+    "2426": { "x": 8, "y": 6 },
+    "2427": { "x": 8, "y": 8 },
+    "2428": { "x": 6, "y": 4 },
+    "2429": { "x": 10, "y": 5 },
+    "2430": { "x": 9, "y": 5 },
+    "2431": { "x": 13, "y": 2 },
+    "2432": { "x": 3, "y": 6 },
+    "2433": { "x": 2, "y": 1 },
+    "2434": { "x": 6, "y": 1 },
+    "2435": { "x": 16, "y": 3 },
+    "2436": { "x": 16, "y": 2 },
+    "2437": { "x": 6, "y": 2 },
+    "2438": { "x": 14, "y": 3 },
+    "2439": { "x": 14, "y": 3 },
+    "2440": { "x": 5, "y": 3 },
+    "2441": { "x": 7, "y": 5 },
+    "2442": { "x": 4, "y": 3 },
+    "2443": { "x": 12, "y": 4 },
+    "2444": { "x": 7, "y": 2 },
+    "2445": { "x": 16, "y": 3 },
+    "2446": { "x": 12, "y": 7 },
+    "2447": { "x": 13, "y": 2 },
+    "2448": { "x": 12, "y": 3 },
+    "2449": { "x": 11, "y": 1 },
+    "2450": { "x": 6, "y": 4 },
+    "2451": { "x": 6, "y": 3 },
+    "2452": { "x": 10, "y": 4 },
+    "2453": { "x": 10, "y": 7 },
+    "2454": { "x": 10, "y": 2 },
+    "2455": { "x": 12, "y": 3 },
+    "2456": { "x": 11, "y": 5 },
+    "2457": { "x": 7, "y": 0 },
+    "2458": { "x": 5, "y": 2 },
+    "2459": { "x": 3, "y": 2 },
+    "2460": { "x": 8, "y": 4 },
+    "2461": { "x": 5, "y": 7 },
+    "2462": { "x": 9, "y": 1 },
+    "2463": { "x": 7, "y": 3 },
+    "2464": { "x": 11, "y": 4 },
+    "2465": { "x": 12, "y": 3 },
+    "2466": { "x": 11, "y": 2 },
+    "2467": { "x": 14, "y": 1 },
+    "2468": { "x": 6, "y": 1 },
+    "2469": { "x": 8, "y": 0 },
+    "2470": { "x": 3, "y": 2 },
+    "2471": { "x": 4, "y": 0 },
+    "2472": { "x": 6, "y": 0 },
+    "2473": { "x": 7, "y": 0 },
+    "2474": { "x": 8, "y": 0 },
+    "2475": { "x": 7, "y": 0 },
+    "2476": { "x": 5, "y": 3 },
+    "2477": { "x": 12, "y": 0 },
+    "2478": { "x": 7, "y": 1 },
+    "2479": { "x": 4, "y": 0 },
+    "2480": { "x": 4, "y": 0 },
+    "2481": { "x": 6, "y": 3 },
+    "2482": { "x": 12, "y": 4 },
+    "2483": { "x": 14, "y": 6 },
+    "2484": { "x": 4, "y": 0 },
+    "2485": { "x": 5, "y": 2 },
+    "2486": { "x": 4, "y": 1 },
+    "2487": { "x": 6, "y": 2 },
+    "2488": { "x": 5, "y": 3 },
+    "2489": { "x": 6, "y": 1 },
+    "2490": { "x": 8, "y": 3 },
+    "2491": { "x": 2, "y": 2 },
+    "2492": { "x": 8, "y": 1 },
+    "2493": { "x": 4, "y": 4 },
+    "2494": { "x": 2, "y": 3 },
+    "2495": { "x": 12, "y": 7 },
+    "2496": { "x": 9, "y": 8 },
+    "2497": { "x": 10, "y": 5 },
+    "2498": { "x": 7, "y": 1 },
+    "2499": { "x": 9, "y": 1 },
+    "2500": { "x": 5, "y": 7 },
+    "2501": { "x": 6, "y": 2 },
+    "2502": { "x": 7, "y": 2 },
+    "2503": { "x": 7, "y": 1 },
+    "2504": { "x": 2, "y": 0 },
+    "2505": { "x": 7, "y": 1 },
+    "2506": { "x": 7, "y": 6 },
+    "2507": { "x": 10, "y": 4 },
+    "2508": { "x": 8, "y": 4 },
+    "2509": { "x": 10, "y": 4 },
+    "2510": { "x": 9, "y": 7 },
+    "2511": { "x": 12, "y": 1 },
+    "2512": { "x": 4, "y": 2 },
+    "2513": { "x": 6, "y": 8 },
+    "2514": { "x": 20, "y": 3 },
+    "2515": { "x": 5, "y": 2 },
+    "2516": { "x": 6, "y": 2 },
+    "2517": { "x": 10, "y": 2 },
+    "2518": { "x": 8, "y": 2 },
+    "2519": { "x": 4, "y": 2 },
+    "2520": { "x": 6, "y": 4 },
+    "2521": { "x": 7, "y": 3 },
+    "2522": { "x": 6, "y": 3 },
+    "2523": { "x": 10, "y": 8 },
+    "2524": { "x": 11, "y": 7 },
+    "2525": { "x": 10, "y": 7 },
+    "2526": { "x": 8, "y": 5 },
+    "2527": { "x": 9, "y": 3 },
+    "2528": { "x": 12, "y": 3 },
+    "2529": { "x": 9, "y": 5 },
+    "2530": { "x": 6, "y": 3 },
+    "2531": { "x": 7, "y": 1 },
+    "2532": { "x": 9, "y": 0 },
+    "2533": { "x": 2, "y": 1 },
+    "2534": { "x": 22, "y": 5 },
+    "2535": { "x": 10, "y": 8 },
+    "2536": { "x": 8, "y": 5 },
+    "2537": { "x": 5, "y": 3 },
+    "2538": { "x": 9, "y": 4 },
+    "2539": { "x": 11, "y": 6 },
+    "2540": { "x": 7, "y": 7 },
+    "2541": { "x": 5, "y": 2 },
+    "2542": { "x": 10, "y": 4 },
+    "2543": { "x": 12, "y": 2 },
+    "2544": { "x": 10, "y": 3 },
+    "2545": { "x": 10, "y": 5 },
+    "2546": { "x": 13, "y": 5 },
+    "2547": { "x": 10, "y": 4 },
+    "2548": { "x": 10, "y": 1 },
+    "2549": { "x": 10, "y": 2 },
+    "2550": { "x": 9, "y": 2 },
+    "2551": { "x": 7, "y": 2 },
+    "2552": { "x": 3, "y": 1 },
+    "2553": { "x": 4, "y": 2 },
+    "2554": { "x": 8, "y": 2 },
+    "2555": { "x": 8, "y": 2 },
+    "2556": { "x": 11, "y": 3 },
+    "2557": { "x": 12, "y": 3 },
+    "2558": { "x": 10, "y": 4 },
+    "2559": { "x": 7, "y": 4 },
+    "2560": { "x": 9, "y": 1 },
+    "2561": { "x": 21, "y": 1 },
+    "2562": { "x": 15, "y": 11 },
+    "2563": { "x": 9, "y": 1 },
+    "2564": { "x": 2, "y": 0 },
+    "2565": { "x": 8, "y": 1 },
+    "2566": { "x": 7, "y": 2 },
+    "2567": { "x": 11, "y": 3 },
+    "2568": { "x": 1, "y": 0 },
+    "2569": { "x": 10, "y": 0 },
+    "2570": { "x": 4, "y": 0 },
+    "2571": { "x": 5, "y": 0 },
+    "2572": { "x": 2, "y": 2 },
+    "2573": { "x": 7, "y": 0 },
+    "2574": { "x": 6, "y": 1 },
+    "2575": { "x": 10, "y": 0 },
+    "2576": { "x": 4, "y": 0 },
+    "2577": { "x": 8, "y": 1 },
+    "2578": { "x": 5, "y": 2 },
+    "2579": { "x": 8, "y": 5 },
+    "2580": { "x": 8, "y": 1 },
+    "2581": { "x": 6, "y": 4 },
+    "2582": { "x": 10, "y": 3 },
+    "2583": { "x": 8, "y": 5 },
+    "2584": { "x": 8, "y": 1 },
+    "2585": { "x": 7, "y": 8 },
+    "2586": { "x": 20, "y": 0 },
+    "2587": { "x": 20, "y": 0 },
+    "2588": { "x": 6, "y": 5 },
+    "3150": { "x": 0, "y": 0 },
+    "3160": { "x": 1, "y": 1 },
+    "3161": { "x": 2, "y": 3 },
+    "3162": { "x": 2, "y": 3 },
+    "3163": { "x": 1, "y": 1 },
+    "3164": { "x": 0, "y": 0 },
+    "3165": { "x": 3, "y": 3 },
+    "3166": { "x": 0, "y": 0 },
+    "3220": { "x": 0, "y": 0 },
+    "3221": { "x": 0, "y": 0 },
+    "3222": { "x": 0, "y": 0 },
+    "3223": { "x": 0, "y": 0 },
+    "3224": { "x": 0, "y": 0 },
+    "3225": { "x": 0, "y": 0 },
+    "3226": { "x": 0, "y": 0 },
+    "3227": { "x": 0, "y": 0 },
+    "3228": { "x": 0, "y": 0 },
+    "3229": { "x": 0, "y": 0 },
+    "3230": { "x": 0, "y": 0 },
+    "3231": { "x": 0, "y": 0 },
+    "3232": { "x": 0, "y": 0 },
+    "3233": { "x": 0, "y": 0 },
+    "3234": { "x": 0, "y": 0 },
+    "3235": { "x": 0, "y": 0 },
+    "3236": { "x": 0, "y": 0 },
+    "3237": { "x": 0, "y": 0 },
+    "3238": { "x": 0, "y": 0 },
+    "3239": { "x": 0, "y": 0 },
+    "3240": { "x": 0, "y": 0 },
+    "3241": { "x": 0, "y": 0 },
+    "3242": { "x": 0, "y": 0 },
+    "3243": { "x": 0, "y": 0 },
+    "3244": { "x": 0, "y": 0 },
+    "3245": { "x": 0, "y": 0 },
+    "3246": { "x": 0, "y": 0 },
+    "3247": { "x": 0, "y": 0 },
+    "3248": { "x": 0, "y": 0 },
+    "3249": { "x": 0, "y": 0 },
+    "3250": { "x": 0, "y": 0 },
+    "3251": { "x": 0, "y": 0 },
+    "3252": { "x": 0, "y": 0 },
+    "3253": { "x": 0, "y": 0 },
+    "3254": { "x": 0, "y": 0 },
+    "3255": { "x": 0, "y": 0 },
+    "3256": { "x": 0, "y": 0 },
+    "3257": { "x": 0, "y": 0 },
+    "3258": { "x": 0, "y": 0 },
+    "3259": { "x": 0, "y": 0 },
+    "3260": { "x": 0, "y": 0 },
+    "3261": { "x": 0, "y": 0 },
+    "3262": { "x": 0, "y": 0 },
+    "3263": { "x": 0, "y": 0 },
+    "3264": { "x": 0, "y": 0 },
+    "3265": { "x": 0, "y": 0 },
+    "3266": { "x": 0, "y": 0 },
+    "3267": { "x": 0, "y": 0 },
+    "3268": { "x": 0, "y": 0 },
+    "3269": { "x": 0, "y": 0 },
+    "3270": { "x": 0, "y": 0 },
+    "3271": { "x": 0, "y": 0 },
+    "3272": { "x": 0, "y": 0 },
+    "3273": { "x": 0, "y": 0 },
+    "3274": { "x": 0, "y": 0 }
+}
+
+},{}],10:[function(require,module,exports){
+module.exports={
+    "0": {
+        "animation": 118,
+        "position": 4
+    },
+    "1": {
+        "animation": 49,
+        "position": 4
+    },
+    "2": {
+        "animation": 99,
+        "position": 3
+    },
+    "3": {
+        "animation": 99,
+        "position": 3
+    },
+    "4": {
+        "animation": 106,
+        "position": 3
+    },
+    "5": {
+        "animation": 71,
+        "position": 5
+    },
+    "6": {
+        "animation": 14,
+        "position": 0
+    },
+    "7": {
+        "animation": 22,
+        "position": 6
+    },
+    "8": {
+        "animation": 29,
+        "position": 1
+    },
+    "9": {
+        "animation": 38,
+        "position": 7
+    },
+    "12": {
+        "animation": 110,
+        "position": 4
+    },
+    "15": {
+        "animation": 46,
+        "position": 6
+    },
+    "16": {
+        "animation": 47,
+        "position": 10
+    },
+    "17": {
+        "animation": 12,
+        "position": 9
+    },
+    "24": {
+        "animation": 80,
+        "position": 8
+    },
+    "28": {
+        "animation": 49,
+        "position": 4
+    },
+    "45": {
+        "animation": 80,
+        "position": 8
+    },
+    "52": {
+        "animation": 49,
+        "position": 4
+    },
+    "59": {
+        "animation": 107,
+        "position": 4
+    },
+    "60": {
+        "animation": 107,
+        "position": 4
+    },
+    "62": {
+        "animation": 48,
+        "position": 4
+    },
+    "63": {
+        "animation": 50,
+        "position": 4
+    },
+    "64": {
+        "animation": 51,
+        "position": 4
+    },
+    "65": {
+        "animation": 52,
+        "position": 4
+    },
+    "66": {
+        "animation": 48,
+        "position": 4
+    },
+    "67": {
+        "animation": 50,
+        "position": 4
+    },
+    "68": {
+        "animation": 51,
+        "position": 4
+    },
+    "69": {
+        "animation": 52,
+        "position": 4
+    },
+    "70": {
+        "animation": 48,
+        "position": 4
+    },
+    "71": {
+        "animation": 49,
+        "position": 4
+    },
+    "72": {
+        "animation": 50,
+        "position": 4
+    },
+    "73": {
+        "animation": 51,
+        "position": 4
+    },
+    "74": {
+        "animation": 52,
+        "position": 4
+    },
+    "75": {
+        "animation": 53,
+        "position": 4
+    },
+    "76": {
+        "animation": 48,
+        "position": 4
+    },
+    "77": {
+        "animation": 49,
+        "position": 4
+    },
+    "78": {
+        "animation": 50,
+        "position": 4
+    },
+    "79": {
+        "animation": 51,
+        "position": 4
+    },
+    "80": {
+        "animation": 52,
+        "position": 4
+    },
+    "81": {
+        "animation": 53,
+        "position": 4
+    },
+    "82": {
+        "animation": 48,
+        "position": 4
+    },
+    "83": {
+        "animation": 49,
+        "position": 4
+    },
+    "84": {
+        "animation": 50,
+        "position": 4
+    },
+    "85": {
+        "animation": 51,
+        "position": 4
+    },
+    "86": {
+        "animation": 52,
+        "position": 4
+    },
+    "87": {
+        "animation": 109,
+        "position": 4
+    },
+    "88": {
+        "animation": 111,
+        "position": 4
+    },
+    "89": {
+        "animation": 110,
+        "position": 4
+    },
+    "90": {
+        "animation": 111,
+        "position": 4
+    },
+    "91": {
+        "animation": 112,
+        "position": 4
+    },
+    "92": {
+        "animation": 113,
+        "position": 4
+    },
+    "93": {
+        "animation": 114,
+        "position": 4
+    },
+    "94": {
+        "animation": 116,
+        "position": 4
+    },
+    "95": {
+        "animation": 118,
+        "position": 4
+    },
+    "96": {
+        "animation": 119,
+        "position": 4
+    },
+    "97": {
+        "animation": 120,
+        "position": 4
+    },
+    "98": {
+        "animation": 121,
+        "position": 4
+    },
+    "100": {
+        "animation": 123,
+        "position": 4
+    },
+    "101": {
+        "animation": 123,
+        "position": 4
+    },
+    "102": {
+        "animation": 123,
+        "position": 4
+    },
+    "103": {
+        "animation": 123,
+        "position": 4
+    },
+    "104": {
+        "animation": 70,
+        "position": 5
+    },
+    "105": {
+        "animation": 72,
+        "position": 5
+    },
+    "106": {
+        "animation": 73,
+        "position": 5
+    },
+    "107": {
+        "animation": 74,
+        "position": 5
+    },
+    "108": {
+        "animation": 13,
+        "position": 0
+    },
+    "109": {
+        "animation": 15,
+        "position": 0
+    },
+    "110": {
+        "animation": 16,
+        "position": 0
+    },
+    "111": {
+        "animation": 17,
+        "position": 0
+    },
+    "112": {
+        "animation": 18,
+        "position": 0
+    },
+    "113": {
+        "animation": 21,
+        "position": 6
+    },
+    "114": {
+        "animation": 23,
+        "position": 6
+    },
+    "115": {
+        "animation": 24,
+        "position": 6
+    },
+    "116": {
+        "animation": 25,
+        "position": 6
+    },
+    "117": {
+        "animation": 28,
+        "position": 1
+    },
+    "118": {
+        "animation": 30,
+        "position": 1
+    },
+    "119": {
+        "animation": 31,
+        "position": 1
+    },
+    "120": {
+        "animation": 32,
+        "position": 1
+    },
+    "121": {
+        "animation": 39,
+        "position": 2
+    },
+    "122": {
+        "animation": 40,
+        "position": 2
+    },
+    "123": {
+        "animation": 41,
+        "position": 2
+    },
+    "124": {
+        "animation": 98,
+        "position": 3
+    },
+    "125": {
+        "animation": 100,
+        "position": 3
+    },
+    "126": {
+        "animation": 101,
+        "position": 3
+    },
+    "127": {
+        "animation": 102,
+        "position": 3
+    },
+    "128": {
+        "animation": 98,
+        "position": 3
+    },
+    "129": {
+        "animation": 100,
+        "position": 3
+    },
+    "130": {
+        "animation": 101,
+        "position": 3
+    },
+    "131": {
+        "animation": 102,
+        "position": 3
+    },
+    "182": {
+        "animation": 10,
+        "position": 8
+    },
+    "183": {
+        "animation": 63,
+        "position": 11
+    },
+    "184": {
+        "animation": 77,
+        "position": 6
+    },
+    "185": {
+        "animation": 78,
+        "position": 5
+    },
+    "186": {
+        "animation": 81,
+        "position": 8
+    },
+    "187": {
+        "animation": 82,
+        "position": 7
+    },
+    "188": {
+        "animation": 108,
+        "position": 3
+    },
+    "189": {
+        "animation": 108,
+        "position": 3
+    },
+    "191": {
+        "animation": 11,
+        "position": 8
+    },
+    "192": {
+        "animation": 9,
+        "position": 5
+    },
+    "194": {
+        "animation": 90,
+        "position": 7
+    },
+    "195": {
+        "animation": 89,
+        "position": 7
+    },
+    "196": {
+        "animation": 33,
+        "position": 1
+    },
+    "197": {
+        "animation": 123,
+        "position": 4
+    },
+    "198": {
+        "animation": 123,
+        "position": 4
+    },
+    "199": {
+        "animation": 79,
+        "position": 5
+    },
+    "203": {
+        "animation": 112,
+        "position": 4
+    },
+    "204": {
+        "animation": 113,
+        "position": 4
+    },
+    "205": {
+        "animation": 109,
+        "position": 4
+    },
+    "206": {
+        "animation": 37,
+        "position": 2
+    },
+    "209": {
+        "animation": 64,
+        "position": 11
+    },
+    "214": {
+        "animation": 92,
+        "position": 7
+    },
+    "215": {
+        "animation": 93,
+        "position": 7
+    },
+    "216": {
+        "animation": 83,
+        "position": 6
+    },
+    "217": {
+        "animation": 48,
+        "position": 4
+    },
+    "225": {
+        "animation": 94,
+        "position": 7
+    },
+    "226": {
+        "animation": 95,
+        "position": 7
+    },
+    "227": {
+        "animation": 96,
+        "position": 7
+    },
+    "229": {
+        "animation": 65,
+        "position": 11
+    },
+    "230": {
+        "animation": 19,
+        "position": 0
+    },
+    "235": {
+        "animation": 80,
+        "position": 8
+    },
+    "248": {
+        "animation": 43,
+        "position": 2
+    },
+    "265": {
+        "animation": 49,
+        "position": 4
+    },
+    "288": {
+        "animation": 81,
+        "position": 8
+    },
+    "289": {
+        "animation": 81,
+        "position": 8
+    },
+    "290": {
+        "animation": 81,
+        "position": 8
+    },
+    "291": {
+        "animation": 81,
+        "position": 8
+    },
+    "292": {
+        "animation": 81,
+        "position": 8
+    },
+    "301": {
+        "animation": 81,
+        "position": 8
+    },
+    "302": {
+        "animation": 81,
+        "position": 8
+    },
+    "303": {
+        "animation": 81,
+        "position": 8
+    },
+    "304": {
+        "animation": 81,
+        "position": 8
+    },
+    "305": {
+        "animation": 81,
+        "position": 8
+    },
+    "307": {
+        "animation": 117,
+        "position": 4
+    },
+    "308": {
+        "animation": 55,
+        "position": 1
+    },
+    "309": {
+        "animation": 57,
+        "position": 1
+    },
+    "310": {
+        "animation": 58,
+        "position": 1
+    },
+    "311": {
+        "animation": 59,
+        "position": 1
+    },
+    "312": {
+        "animation": 56,
+        "position": 1
+    },
+    "313": {
+        "animation": 61,
+        "position": 1
+    },
+    "314": {
+        "animation": 81,
+        "position": 8
+    },
+    "315": {
+        "animation": 81,
+        "position": 8
+    },
+    "316": {
+        "animation": 81,
+        "position": 8
+    },
+    "317": {
+        "animation": 81,
+        "position": 8
+    },
+    "385": {
+        "animation": 80,
+        "position": 8
+    },
+    "388": {
+        "animation": 84,
+        "position": 6
+    },
+    "389": {
+        "animation": 88,
+        "position": 7
+    },
+    "396": {
+        "animation": 53,
+        "position": 4
+    },
+    "397": {
+        "animation": 53,
+        "position": 4
+    },
+    "398": {
+        "animation": 53,
+        "position": 4
+    },
+    "399": {
+        "animation": 75,
+        "position": 5
+    },
+    "400": {
+        "animation": 26,
+        "position": 6
+    },
+    "401": {
+        "animation": 34,
+        "position": 1
+    },
+    "402": {
+        "animation": 42,
+        "position": 2
+    },
+    "403": {
+        "animation": 103,
+        "position": 3
+    },
+    "404": {
+        "animation": 103,
+        "position": 3
+    },
+    "405": {
+        "animation": 114,
+        "position": 4
+    },
+    "406": {
+        "animation": 97,
+        "position": 7
+    },
+    "407": {
+        "animation": 60,
+        "position": 1
+    },
+    "420": {
+        "animation": 105,
+        "position": 3
+    },
+    "423": {
+        "animation": 54,
+        "position": 4
+    },
+    "424": {
+        "animation": 54,
+        "position": 4
+    },
+    "425": {
+        "animation": 54,
+        "position": 4
+    },
+    "426": {
+        "animation": 54,
+        "position": 4
+    },
+    "427": {
+        "animation": 54,
+        "position": 4
+    },
+    "428": {
+        "animation": 238,
+        "position": 4
+    },
+    "429": {
+        "animation": 115,
+        "position": 4
+    },
+    "430": {
+        "animation": 122,
+        "position": 4
+    },
+    "431": {
+        "animation": 27,
+        "position": 6
+    },
+    "432": {
+        "animation": 104,
+        "position": 3
+    },
+    "433": {
+        "animation": 104,
+        "position": 3
+    },
+    "434": {
+        "animation": 159,
+        "position": 7
+    },
+    "470": {
+        "animation": 76,
+        "position": 5
+    },
+    "509": {
+        "animation": 123,
+        "position": 4
+    },
+    "511": {
+        "animation": 66,
+        "position": 11
+    },
+    "512": {
+        "animation": 67,
+        "position": 11
+    },
+    "513": {
+        "animation": 68,
+        "position": 11
+    },
+    "514": {
+        "animation": 69,
+        "position": 11
+    },
+    "522": {
+        "animation": 81,
+        "position": 8
+    },
+    "544": {
+        "animation": 81,
+        "position": 8
+    },
+    "556": {
+        "animation": 156,
+        "position": 10
+    },
+    "559": {
+        "animation": 49,
+        "position": 4
+    },
+    "560": {
+        "animation": 48,
+        "position": 4
+    },
+    "561": {
+        "animation": 50,
+        "position": 4
+    },
+    "562": {
+        "animation": 51,
+        "position": 4
+    },
+    "563": {
+        "animation": 53,
+        "position": 4
+    },
+    "564": {
+        "animation": 52,
+        "position": 4
+    },
+    "565": {
+        "animation": 54,
+        "position": 4
+    },
+    "576": {
+        "animation": 150,
+        "position": 5
+    },
+    "577": {
+        "animation": 151,
+        "position": 5
+    },
+    "578": {
+        "animation": 152,
+        "position": 5
+    },
+    "579": {
+        "animation": 153,
+        "position": 5
+    },
+    "580": {
+        "animation": 154,
+        "position": 5
+    },
+    "581": {
+        "animation": 155,
+        "position": 5
+    },
+    "593": {
+        "animation": 163,
+        "position": 4
+    },
+    "594": {
+        "animation": 162,
+        "position": 4
+    },
+    "597": {
+        "animation": 81,
+        "position": 8
+    },
+    "606": {
+        "animation": 49,
+        "position": 4
+    },
+    "607": {
+        "animation": 86,
+        "position": 6
+    },
+    "608": {
+        "animation": 87,
+        "position": 7
+    },
+    "609": {
+        "animation": 164,
+        "position": 5
+    },
+    "610": {
+        "animation": 81,
+        "position": 8
+    },
+    "614": {
+        "animation": 123,
+        "position": 4
+    },
+    "615": {
+        "animation": 123,
+        "position": 4
+    },
+    "616": {
+        "animation": 123,
+        "position": 4
+    },
+    "617": {
+        "animation": 123,
+        "position": 4
+    },
+    "618": {
+        "animation": 123,
+        "position": 4
+    },
+    "648": {
+        "animation": 108,
+        "position": 3
+    },
+    "649": {
+        "animation": 108,
+        "position": 3
+    },
+    "650": {
+        "animation": 108,
+        "position": 3
+    },
+    "651": {
+        "animation": 108,
+        "position": 3
+    },
+    "652": {
+        "animation": 108,
+        "position": 3
+    },
+    "653": {
+        "animation": 108,
+        "position": 3
+    },
+    "654": {
+        "animation": 108,
+        "position": 3
+    },
+    "655": {
+        "animation": 108,
+        "position": 3
+    },
+    "656": {
+        "animation": 108,
+        "position": 3
+    },
+    "657": {
+        "animation": 108,
+        "position": 3
+    },
+    "682": {
+        "animation": 123,
+        "position": 4
+    },
+    "683": {
+        "animation": 123,
+        "position": 4
+    },
+    "684": {
+        "animation": 123,
+        "position": 4
+    },
+    "685": {
+        "animation": 123,
+        "position": 4
+    },
+    "693": {
+        "animation": 81,
+        "position": 8
+    },
+    "698": {
+        "animation": 156,
+        "position": 10
+    },
+    "699": {
+        "animation": 156,
+        "position": 10
+    },
+    "700": {
+        "animation": 156,
+        "position": 10
+    },
+    "701": {
+        "animation": 156,
+        "position": 10
+    },
+    "702": {
+        "animation": 85,
+        "position": 6
+    },
+    "703": {
+        "animation": 91,
+        "position": 7
+    },
+    "721": {
+        "animation": 172,
+        "position": 8
+    },
+    "722": {
+        "animation": 227,
+        "position": 9
+    },
+    "725": {
+        "animation": 123,
+        "position": 4
+    },
+    "726": {
+        "animation": 80,
+        "position": 8
+    },
+    "733": {
+        "animation": 174,
+        "position": 5
+    },
+    "734": {
+        "animation": 175,
+        "position": 6
+    },
+    "744": {
+        "animation": 81,
+        "position": 8
+    },
+    "754": {
+        "animation": 110,
+        "position": 4
+    },
+    "760": {
+        "animation": 46,
+        "position": 6
+    },
+    "761": {
+        "animation": 177,
+        "position": 2
+    },
+    "766": {
+        "animation": 178,
+        "position": 5
+    },
+    "782": {
+        "animation": 80,
+        "position": 8
+    },
+    "795": {
+        "animation": 179,
+        "position": 5
+    },
+    "802": {
+        "animation": 86,
+        "position": 6
+    },
+    "807": {
+        "animation": 228,
+        "position": 6
+    },
+    "808": {
+        "animation": 159,
+        "position": 7
+    },
+    "826": {
+        "animation": 81,
+        "position": 8
+    },
+    "827": {
+        "animation": 181,
+        "position": 4
+    },
+    "828": {
+        "animation": 182,
+        "position": 5
+    },
+    "831": {
+        "animation": 185,
+        "position": 5
+    },
+    "832": {
+        "animation": 186,
+        "position": 5
+    },
+    "836": {
+        "animation": 187,
+        "position": 7
+    },
+    "837": {
+        "animation": 188,
+        "position": 7
+    },
+    "838": {
+        "animation": 189,
+        "position": 7
+    },
+    "839": {
+        "animation": 190,
+        "position": 7
+    },
+    "840": {
+        "animation": 191,
+        "position": 7
+    },
+    "841": {
+        "animation": 192,
+        "position": 5
+    },
+    "842": {
+        "animation": 193,
+        "position": 5
+    },
+    "843": {
+        "animation": 194,
+        "position": 5
+    },
+    "844": {
+        "animation": 195,
+        "position": 5
+    },
+    "845": {
+        "animation": 196,
+        "position": 5
+    },
+    "846": {
+        "animation": 197,
+        "position": 6
+    },
+    "847": {
+        "animation": 198,
+        "position": 6
+    },
+    "848": {
+        "animation": 199,
+        "position": 6
+    },
+    "849": {
+        "animation": 200,
+        "position": 6
+    },
+    "850": {
+        "animation": 201,
+        "position": 6
+    },
+    "852": {
+        "animation": 81,
+        "position": 8
+    },
+    "966": {
+        "animation": 204,
+        "position": 9
+    },
+    "967": {
+        "animation": 205,
+        "position": 9
+    },
+    "968": {
+        "animation": 206,
+        "position": 9
+    },
+    "969": {
+        "animation": 207,
+        "position": 9
+    },
+    "970": {
+        "animation": 208,
+        "position": 9
+    },
+    "971": {
+        "animation": 209,
+        "position": 5
+    },
+    "990": {
+        "animation": 212,
+        "position": 9
+    },
+    "1000": {
+        "animation": 210,
+        "position": 4
+    },
+    "1006": {
+        "animation": 156,
+        "position": 10
+    },
+    "1009": {
+        "animation": 81,
+        "position": 8
+    },
+    "1010": {
+        "animation": 81,
+        "position": 8
+    },
+    "1011": {
+        "animation": 81,
+        "position": 8
+    },
+    "1013": {
+        "animation": 0,
+        "position": 4
+    },
+    "1015": {
+        "animation": 0,
+        "position": 4
+    },
+    "1019": {
+        "animation": 87,
+        "position": 7
+    },
+    "1020": {
+        "animation": 86,
+        "position": 6
+    },
+    "1022": {
+        "animation": 215,
+        "position": 7
+    },
+    "1023": {
+        "animation": 214,
+        "position": 6
+    },
+    "1024": {
+        "animation": 0,
+        "position": 4
+    },
+    "1028": {
+        "animation": 80,
+        "position": 8
+    },
+    "1029": {
+        "animation": 80,
+        "position": 8
+    },
+    "1068": {
+        "animation": 0,
+        "position": 4
+    },
+    "1069": {
+        "animation": 0,
+        "position": 4
+    },
+    "1070": {
+        "animation": 0,
+        "position": 4
+    },
+    "1075": {
+        "animation": 49,
+        "position": 4
+    },
+    "1076": {
+        "animation": 48,
+        "position": 4
+    },
+    "1077": {
+        "animation": 50,
+        "position": 4
+    },
+    "1078": {
+        "animation": 51,
+        "position": 4
+    },
+    "1079": {
+        "animation": 52,
+        "position": 4
+    },
+    "1080": {
+        "animation": 53,
+        "position": 4
+    },
+    "1081": {
+        "animation": 54,
+        "position": 4
+    },
+    "1088": {
+        "animation": 181,
+        "position": 4
+    },
+    "1089": {
+        "animation": 181,
+        "position": 4
+    },
+    "1090": {
+        "animation": 181,
+        "position": 4
+    },
+    "1091": {
+        "animation": 181,
+        "position": 4
+    },
+    "1092": {
+        "animation": 220,
+        "position": 4
+    },
+    "1122": {
+        "animation": 0,
+        "position": 4
+    },
+    "1123": {
+        "animation": 0,
+        "position": 4
+    },
+    "1124": {
+        "animation": 0,
+        "position": 4
+    },
+    "1125": {
+        "animation": 0,
+        "position": 4
+    },
+    "1126": {
+        "animation": 0,
+        "position": 4
+    },
+    "1127": {
+        "animation": 0,
+        "position": 4
+    },
+    "1128": {
+        "animation": 48,
+        "position": 4
+    },
+    "1129": {
+        "animation": 49,
+        "position": 4
+    },
+    "1130": {
+        "animation": 50,
+        "position": 4
+    },
+    "1131": {
+        "animation": 51,
+        "position": 4
+    },
+    "1132": {
+        "animation": 54,
+        "position": 4
+    },
+    "1133": {
+        "animation": 52,
+        "position": 4
+    },
+    "1134": {
+        "animation": 53,
+        "position": 4
+    },
+    "1135": {
+        "animation": 181,
+        "position": 4
+    },
+    "1136": {
+        "animation": 181,
+        "position": 4
+    },
+    "1137": {
+        "animation": 181,
+        "position": 4
+    },
+    "1138": {
+        "animation": 181,
+        "position": 4
+    },
+    "1139": {
+        "animation": 181,
+        "position": 4
+    },
+    "1140": {
+        "animation": 220,
+        "position": 4
+    },
+    "1156": {
+        "animation": 218,
+        "position": 5
+    },
+    "1172": {
+        "animation": 49,
+        "position": 4
+    },
+    "1194": {
+        "animation": 80,
+        "position": 8
+    },
+    "1205": {
+        "animation": 49,
+        "position": 4
+    },
+    "1213": {
+        "animation": 63,
+        "position": 11
+    },
+    "1214": {
+        "animation": 65,
+        "position": 11
+    },
+    "1215": {
+        "animation": 66,
+        "position": 11
+    },
+    "1216": {
+        "animation": 210,
+        "position": 4
+    },
+    "1217": {
+        "animation": 123,
+        "position": 4
+    },
+    "1218": {
+        "animation": 219,
+        "position": 4
+    },
+    "1224": {
+        "animation": 80,
+        "position": 8
+    },
+    "1230": {
+        "animation": 49,
+        "position": 4
+    },
+    "1234": {
+        "animation": 77,
+        "position": 6
+    },
+    "1236": {
+        "animation": 49,
+        "position": 4
+    },
+    "1237": {
+        "animation": 164,
+        "position": 5
+    },
+    "1239": {
+        "animation": 0,
+        "position": 4
+    },
+    "1255": {
+        "animation": 49,
+        "position": 4
+    },
+    "1256": {
+        "animation": 49,
+        "position": 4
+    },
+    "1264": {
+        "animation": 78,
+        "position": 5
+    },
+    "1278": {
+        "animation": 225,
+        "position": 3
+    },
+    "1288": {
+        "animation": 226,
+        "position": 11
+    },
+    "1289": {
+        "animation": 229,
+        "position": 4
+    }
+}
+
+},{}],11:[function(require,module,exports){
+
+},{}],12:[function(require,module,exports){
+/*!
+ * The buffer module from node.js, for the browser.
+ *
+ * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @license  MIT
+ */
+/* eslint-disable no-proto */
+
+'use strict'
+
+var base64 = require('base64-js')
+var ieee754 = require('ieee754')
+
+exports.Buffer = Buffer
+exports.SlowBuffer = SlowBuffer
+exports.INSPECT_MAX_BYTES = 50
+
+var K_MAX_LENGTH = 0x7fffffff
+exports.kMaxLength = K_MAX_LENGTH
+
+/**
+ * If `Buffer.TYPED_ARRAY_SUPPORT`:
+ *   === true    Use Uint8Array implementation (fastest)
+ *   === false   Print warning and recommend using `buffer` v4.x which has an Object
+ *               implementation (most compatible, even IE6)
+ *
+ * Browsers that support typed arrays are IE 10+, Firefox 4+, Chrome 7+, Safari 5.1+,
+ * Opera 11.6+, iOS 4.2+.
+ *
+ * We report that the browser does not support typed arrays if the are not subclassable
+ * using __proto__. Firefox 4-29 lacks support for adding new properties to `Uint8Array`
+ * (See: https://bugzilla.mozilla.org/show_bug.cgi?id=695438). IE 10 lacks support
+ * for __proto__ and has a buggy typed array implementation.
+ */
+Buffer.TYPED_ARRAY_SUPPORT = typedArraySupport()
+
+if (!Buffer.TYPED_ARRAY_SUPPORT && typeof console !== 'undefined' &&
+    typeof console.error === 'function') {
+  console.error(
+    'This browser lacks typed array (Uint8Array) support which is required by ' +
+    '`buffer` v5.x. Use `buffer` v4.x if you require old browser support.'
+  )
+}
+
+function typedArraySupport () {
+  // Can typed array instances can be augmented?
+  try {
+    var arr = new Uint8Array(1)
+    arr.__proto__ = {__proto__: Uint8Array.prototype, foo: function () { return 42 }}
+    return arr.foo() === 42
+  } catch (e) {
+    return false
+  }
+}
+
+function createBuffer (length) {
+  if (length > K_MAX_LENGTH) {
+    throw new RangeError('Invalid typed array length')
+  }
+  // Return an augmented `Uint8Array` instance
+  var buf = new Uint8Array(length)
+  buf.__proto__ = Buffer.prototype
+  return buf
+}
+
+/**
+ * The Buffer constructor returns instances of `Uint8Array` that have their
+ * prototype changed to `Buffer.prototype`. Furthermore, `Buffer` is a subclass of
+ * `Uint8Array`, so the returned instances will have all the node `Buffer` methods
+ * and the `Uint8Array` methods. Square bracket notation works as expected -- it
+ * returns a single octet.
+ *
+ * The `Uint8Array` prototype remains unmodified.
+ */
+
+function Buffer (arg, encodingOrOffset, length) {
+  // Common case.
+  if (typeof arg === 'number') {
+    if (typeof encodingOrOffset === 'string') {
+      throw new Error(
+        'If encoding is specified then the first argument must be a string'
+      )
+    }
+    return allocUnsafe(arg)
+  }
+  return from(arg, encodingOrOffset, length)
+}
+
+// Fix subarray() in ES2016. See: https://github.com/feross/buffer/pull/97
+if (typeof Symbol !== 'undefined' && Symbol.species &&
+    Buffer[Symbol.species] === Buffer) {
+  Object.defineProperty(Buffer, Symbol.species, {
+    value: null,
+    configurable: true,
+    enumerable: false,
+    writable: false
+  })
+}
+
+Buffer.poolSize = 8192 // not used by this implementation
+
+function from (value, encodingOrOffset, length) {
+  if (typeof value === 'number') {
+    throw new TypeError('"value" argument must not be a number')
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return fromArrayBuffer(value, encodingOrOffset, length)
+  }
+
+  if (typeof value === 'string') {
+    return fromString(value, encodingOrOffset)
+  }
+
+  return fromObject(value)
+}
+
+/**
+ * Functionally equivalent to Buffer(arg, encoding) but throws a TypeError
+ * if value is a number.
+ * Buffer.from(str[, encoding])
+ * Buffer.from(array)
+ * Buffer.from(buffer)
+ * Buffer.from(arrayBuffer[, byteOffset[, length]])
+ **/
+Buffer.from = function (value, encodingOrOffset, length) {
+  return from(value, encodingOrOffset, length)
+}
+
+// Note: Change prototype *after* Buffer.from is defined to workaround Chrome bug:
+// https://github.com/feross/buffer/pull/148
+Buffer.prototype.__proto__ = Uint8Array.prototype
+Buffer.__proto__ = Uint8Array
+
+function assertSize (size) {
+  if (typeof size !== 'number') {
+    throw new TypeError('"size" argument must be a number')
+  } else if (size < 0) {
+    throw new RangeError('"size" argument must not be negative')
+  }
+}
+
+function alloc (size, fill, encoding) {
+  assertSize(size)
+  if (size <= 0) {
+    return createBuffer(size)
+  }
+  if (fill !== undefined) {
+    // Only pay attention to encoding if it's a string. This
+    // prevents accidentally sending in a number that would
+    // be interpretted as a start offset.
+    return typeof encoding === 'string'
+      ? createBuffer(size).fill(fill, encoding)
+      : createBuffer(size).fill(fill)
+  }
+  return createBuffer(size)
+}
+
+/**
+ * Creates a new filled Buffer instance.
+ * alloc(size[, fill[, encoding]])
+ **/
+Buffer.alloc = function (size, fill, encoding) {
+  return alloc(size, fill, encoding)
+}
+
+function allocUnsafe (size) {
+  assertSize(size)
+  return createBuffer(size < 0 ? 0 : checked(size) | 0)
+}
+
+/**
+ * Equivalent to Buffer(num), by default creates a non-zero-filled Buffer instance.
+ * */
+Buffer.allocUnsafe = function (size) {
+  return allocUnsafe(size)
+}
+/**
+ * Equivalent to SlowBuffer(num), by default creates a non-zero-filled Buffer instance.
+ */
+Buffer.allocUnsafeSlow = function (size) {
+  return allocUnsafe(size)
+}
+
+function fromString (string, encoding) {
+  if (typeof encoding !== 'string' || encoding === '') {
+    encoding = 'utf8'
+  }
+
+  if (!Buffer.isEncoding(encoding)) {
+    throw new TypeError('"encoding" must be a valid string encoding')
+  }
+
+  var length = byteLength(string, encoding) | 0
+  var buf = createBuffer(length)
+
+  var actual = buf.write(string, encoding)
+
+  if (actual !== length) {
+    // Writing a hex string, for example, that contains invalid characters will
+    // cause everything after the first invalid character to be ignored. (e.g.
+    // 'abxxcd' will be treated as 'ab')
+    buf = buf.slice(0, actual)
+  }
+
+  return buf
+}
+
+function fromArrayLike (array) {
+  var length = array.length < 0 ? 0 : checked(array.length) | 0
+  var buf = createBuffer(length)
+  for (var i = 0; i < length; i += 1) {
+    buf[i] = array[i] & 255
+  }
+  return buf
+}
+
+function fromArrayBuffer (array, byteOffset, length) {
+  if (byteOffset < 0 || array.byteLength < byteOffset) {
+    throw new RangeError('\'offset\' is out of bounds')
+  }
+
+  if (array.byteLength < byteOffset + (length || 0)) {
+    throw new RangeError('\'length\' is out of bounds')
+  }
+
+  var buf
+  if (byteOffset === undefined && length === undefined) {
+    buf = new Uint8Array(array)
+  } else if (length === undefined) {
+    buf = new Uint8Array(array, byteOffset)
+  } else {
+    buf = new Uint8Array(array, byteOffset, length)
+  }
+
+  // Return an augmented `Uint8Array` instance
+  buf.__proto__ = Buffer.prototype
+  return buf
+}
+
+function fromObject (obj) {
+  if (Buffer.isBuffer(obj)) {
+    var len = checked(obj.length) | 0
+    var buf = createBuffer(len)
+
+    if (buf.length === 0) {
+      return buf
+    }
+
+    obj.copy(buf, 0, 0, len)
+    return buf
+  }
+
+  if (obj) {
+    if (isArrayBufferView(obj) || 'length' in obj) {
+      if (typeof obj.length !== 'number' || numberIsNaN(obj.length)) {
+        return createBuffer(0)
+      }
+      return fromArrayLike(obj)
+    }
+
+    if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
+      return fromArrayLike(obj.data)
+    }
+  }
+
+  throw new TypeError('First argument must be a string, Buffer, ArrayBuffer, Array, or array-like object.')
+}
+
+function checked (length) {
+  // Note: cannot use `length < K_MAX_LENGTH` here because that fails when
+  // length is NaN (which is otherwise coerced to zero.)
+  if (length >= K_MAX_LENGTH) {
+    throw new RangeError('Attempt to allocate Buffer larger than maximum ' +
+                         'size: 0x' + K_MAX_LENGTH.toString(16) + ' bytes')
+  }
+  return length | 0
+}
+
+function SlowBuffer (length) {
+  if (+length != length) { // eslint-disable-line eqeqeq
+    length = 0
+  }
+  return Buffer.alloc(+length)
+}
+
+Buffer.isBuffer = function isBuffer (b) {
+  return b != null && b._isBuffer === true
+}
+
+Buffer.compare = function compare (a, b) {
+  if (!Buffer.isBuffer(a) || !Buffer.isBuffer(b)) {
+    throw new TypeError('Arguments must be Buffers')
+  }
+
+  if (a === b) return 0
+
+  var x = a.length
+  var y = b.length
+
+  for (var i = 0, len = Math.min(x, y); i < len; ++i) {
+    if (a[i] !== b[i]) {
+      x = a[i]
+      y = b[i]
+      break
+    }
+  }
+
+  if (x < y) return -1
+  if (y < x) return 1
+  return 0
+}
+
+Buffer.isEncoding = function isEncoding (encoding) {
+  switch (String(encoding).toLowerCase()) {
+    case 'hex':
+    case 'utf8':
+    case 'utf-8':
+    case 'ascii':
+    case 'latin1':
+    case 'binary':
+    case 'base64':
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      return true
+    default:
+      return false
+  }
+}
+
+Buffer.concat = function concat (list, length) {
+  if (!Array.isArray(list)) {
+    throw new TypeError('"list" argument must be an Array of Buffers')
+  }
+
+  if (list.length === 0) {
+    return Buffer.alloc(0)
+  }
+
+  var i
+  if (length === undefined) {
+    length = 0
+    for (i = 0; i < list.length; ++i) {
+      length += list[i].length
+    }
+  }
+
+  var buffer = Buffer.allocUnsafe(length)
+  var pos = 0
+  for (i = 0; i < list.length; ++i) {
+    var buf = list[i]
+    if (!Buffer.isBuffer(buf)) {
+      throw new TypeError('"list" argument must be an Array of Buffers')
+    }
+    buf.copy(buffer, pos)
+    pos += buf.length
+  }
+  return buffer
+}
+
+function byteLength (string, encoding) {
+  if (Buffer.isBuffer(string)) {
+    return string.length
+  }
+  if (isArrayBufferView(string) || string instanceof ArrayBuffer) {
+    return string.byteLength
+  }
+  if (typeof string !== 'string') {
+    string = '' + string
+  }
+
+  var len = string.length
+  if (len === 0) return 0
+
+  // Use a for loop to avoid recursion
+  var loweredCase = false
+  for (;;) {
+    switch (encoding) {
+      case 'ascii':
+      case 'latin1':
+      case 'binary':
+        return len
+      case 'utf8':
+      case 'utf-8':
+      case undefined:
+        return utf8ToBytes(string).length
+      case 'ucs2':
+      case 'ucs-2':
+      case 'utf16le':
+      case 'utf-16le':
+        return len * 2
+      case 'hex':
+        return len >>> 1
+      case 'base64':
+        return base64ToBytes(string).length
+      default:
+        if (loweredCase) return utf8ToBytes(string).length // assume utf8
+        encoding = ('' + encoding).toLowerCase()
+        loweredCase = true
+    }
+  }
+}
+Buffer.byteLength = byteLength
+
+function slowToString (encoding, start, end) {
+  var loweredCase = false
+
+  // No need to verify that "this.length <= MAX_UINT32" since it's a read-only
+  // property of a typed array.
+
+  // This behaves neither like String nor Uint8Array in that we set start/end
+  // to their upper/lower bounds if the value passed is out of range.
+  // undefined is handled specially as per ECMA-262 6th Edition,
+  // Section 13.3.3.7 Runtime Semantics: KeyedBindingInitialization.
+  if (start === undefined || start < 0) {
+    start = 0
+  }
+  // Return early if start > this.length. Done here to prevent potential uint32
+  // coercion fail below.
+  if (start > this.length) {
+    return ''
+  }
+
+  if (end === undefined || end > this.length) {
+    end = this.length
+  }
+
+  if (end <= 0) {
+    return ''
+  }
+
+  // Force coersion to uint32. This will also coerce falsey/NaN values to 0.
+  end >>>= 0
+  start >>>= 0
+
+  if (end <= start) {
+    return ''
+  }
+
+  if (!encoding) encoding = 'utf8'
+
+  while (true) {
+    switch (encoding) {
+      case 'hex':
+        return hexSlice(this, start, end)
+
+      case 'utf8':
+      case 'utf-8':
+        return utf8Slice(this, start, end)
+
+      case 'ascii':
+        return asciiSlice(this, start, end)
+
+      case 'latin1':
+      case 'binary':
+        return latin1Slice(this, start, end)
+
+      case 'base64':
+        return base64Slice(this, start, end)
+
+      case 'ucs2':
+      case 'ucs-2':
+      case 'utf16le':
+      case 'utf-16le':
+        return utf16leSlice(this, start, end)
+
+      default:
+        if (loweredCase) throw new TypeError('Unknown encoding: ' + encoding)
+        encoding = (encoding + '').toLowerCase()
+        loweredCase = true
+    }
+  }
+}
+
+// This property is used by `Buffer.isBuffer` (and the `is-buffer` npm package)
+// to detect a Buffer instance. It's not possible to use `instanceof Buffer`
+// reliably in a browserify context because there could be multiple different
+// copies of the 'buffer' package in use. This method works even for Buffer
+// instances that were created from another copy of the `buffer` package.
+// See: https://github.com/feross/buffer/issues/154
+Buffer.prototype._isBuffer = true
+
+function swap (b, n, m) {
+  var i = b[n]
+  b[n] = b[m]
+  b[m] = i
+}
+
+Buffer.prototype.swap16 = function swap16 () {
+  var len = this.length
+  if (len % 2 !== 0) {
+    throw new RangeError('Buffer size must be a multiple of 16-bits')
+  }
+  for (var i = 0; i < len; i += 2) {
+    swap(this, i, i + 1)
+  }
+  return this
+}
+
+Buffer.prototype.swap32 = function swap32 () {
+  var len = this.length
+  if (len % 4 !== 0) {
+    throw new RangeError('Buffer size must be a multiple of 32-bits')
+  }
+  for (var i = 0; i < len; i += 4) {
+    swap(this, i, i + 3)
+    swap(this, i + 1, i + 2)
+  }
+  return this
+}
+
+Buffer.prototype.swap64 = function swap64 () {
+  var len = this.length
+  if (len % 8 !== 0) {
+    throw new RangeError('Buffer size must be a multiple of 64-bits')
+  }
+  for (var i = 0; i < len; i += 8) {
+    swap(this, i, i + 7)
+    swap(this, i + 1, i + 6)
+    swap(this, i + 2, i + 5)
+    swap(this, i + 3, i + 4)
+  }
+  return this
+}
+
+Buffer.prototype.toString = function toString () {
+  var length = this.length
+  if (length === 0) return ''
+  if (arguments.length === 0) return utf8Slice(this, 0, length)
+  return slowToString.apply(this, arguments)
+}
+
+Buffer.prototype.equals = function equals (b) {
+  if (!Buffer.isBuffer(b)) throw new TypeError('Argument must be a Buffer')
+  if (this === b) return true
+  return Buffer.compare(this, b) === 0
+}
+
+Buffer.prototype.inspect = function inspect () {
+  var str = ''
+  var max = exports.INSPECT_MAX_BYTES
+  if (this.length > 0) {
+    str = this.toString('hex', 0, max).match(/.{2}/g).join(' ')
+    if (this.length > max) str += ' ... '
+  }
+  return '<Buffer ' + str + '>'
+}
+
+Buffer.prototype.compare = function compare (target, start, end, thisStart, thisEnd) {
+  if (!Buffer.isBuffer(target)) {
+    throw new TypeError('Argument must be a Buffer')
+  }
+
+  if (start === undefined) {
+    start = 0
+  }
+  if (end === undefined) {
+    end = target ? target.length : 0
+  }
+  if (thisStart === undefined) {
+    thisStart = 0
+  }
+  if (thisEnd === undefined) {
+    thisEnd = this.length
+  }
+
+  if (start < 0 || end > target.length || thisStart < 0 || thisEnd > this.length) {
+    throw new RangeError('out of range index')
+  }
+
+  if (thisStart >= thisEnd && start >= end) {
+    return 0
+  }
+  if (thisStart >= thisEnd) {
+    return -1
+  }
+  if (start >= end) {
+    return 1
+  }
+
+  start >>>= 0
+  end >>>= 0
+  thisStart >>>= 0
+  thisEnd >>>= 0
+
+  if (this === target) return 0
+
+  var x = thisEnd - thisStart
+  var y = end - start
+  var len = Math.min(x, y)
+
+  var thisCopy = this.slice(thisStart, thisEnd)
+  var targetCopy = target.slice(start, end)
+
+  for (var i = 0; i < len; ++i) {
+    if (thisCopy[i] !== targetCopy[i]) {
+      x = thisCopy[i]
+      y = targetCopy[i]
+      break
+    }
+  }
+
+  if (x < y) return -1
+  if (y < x) return 1
+  return 0
+}
+
+// Finds either the first index of `val` in `buffer` at offset >= `byteOffset`,
+// OR the last index of `val` in `buffer` at offset <= `byteOffset`.
+//
+// Arguments:
+// - buffer - a Buffer to search
+// - val - a string, Buffer, or number
+// - byteOffset - an index into `buffer`; will be clamped to an int32
+// - encoding - an optional encoding, relevant is val is a string
+// - dir - true for indexOf, false for lastIndexOf
+function bidirectionalIndexOf (buffer, val, byteOffset, encoding, dir) {
+  // Empty buffer means no match
+  if (buffer.length === 0) return -1
+
+  // Normalize byteOffset
+  if (typeof byteOffset === 'string') {
+    encoding = byteOffset
+    byteOffset = 0
+  } else if (byteOffset > 0x7fffffff) {
+    byteOffset = 0x7fffffff
+  } else if (byteOffset < -0x80000000) {
+    byteOffset = -0x80000000
+  }
+  byteOffset = +byteOffset  // Coerce to Number.
+  if (numberIsNaN(byteOffset)) {
+    // byteOffset: it it's undefined, null, NaN, "foo", etc, search whole buffer
+    byteOffset = dir ? 0 : (buffer.length - 1)
+  }
+
+  // Normalize byteOffset: negative offsets start from the end of the buffer
+  if (byteOffset < 0) byteOffset = buffer.length + byteOffset
+  if (byteOffset >= buffer.length) {
+    if (dir) return -1
+    else byteOffset = buffer.length - 1
+  } else if (byteOffset < 0) {
+    if (dir) byteOffset = 0
+    else return -1
+  }
+
+  // Normalize val
+  if (typeof val === 'string') {
+    val = Buffer.from(val, encoding)
+  }
+
+  // Finally, search either indexOf (if dir is true) or lastIndexOf
+  if (Buffer.isBuffer(val)) {
+    // Special case: looking for empty string/buffer always fails
+    if (val.length === 0) {
+      return -1
+    }
+    return arrayIndexOf(buffer, val, byteOffset, encoding, dir)
+  } else if (typeof val === 'number') {
+    val = val & 0xFF // Search for a byte value [0-255]
+    if (typeof Uint8Array.prototype.indexOf === 'function') {
+      if (dir) {
+        return Uint8Array.prototype.indexOf.call(buffer, val, byteOffset)
+      } else {
+        return Uint8Array.prototype.lastIndexOf.call(buffer, val, byteOffset)
+      }
+    }
+    return arrayIndexOf(buffer, [ val ], byteOffset, encoding, dir)
+  }
+
+  throw new TypeError('val must be string, number or Buffer')
+}
+
+function arrayIndexOf (arr, val, byteOffset, encoding, dir) {
+  var indexSize = 1
+  var arrLength = arr.length
+  var valLength = val.length
+
+  if (encoding !== undefined) {
+    encoding = String(encoding).toLowerCase()
+    if (encoding === 'ucs2' || encoding === 'ucs-2' ||
+        encoding === 'utf16le' || encoding === 'utf-16le') {
+      if (arr.length < 2 || val.length < 2) {
+        return -1
+      }
+      indexSize = 2
+      arrLength /= 2
+      valLength /= 2
+      byteOffset /= 2
+    }
+  }
+
+  function read (buf, i) {
+    if (indexSize === 1) {
+      return buf[i]
+    } else {
+      return buf.readUInt16BE(i * indexSize)
+    }
+  }
+
+  var i
+  if (dir) {
+    var foundIndex = -1
+    for (i = byteOffset; i < arrLength; i++) {
+      if (read(arr, i) === read(val, foundIndex === -1 ? 0 : i - foundIndex)) {
+        if (foundIndex === -1) foundIndex = i
+        if (i - foundIndex + 1 === valLength) return foundIndex * indexSize
+      } else {
+        if (foundIndex !== -1) i -= i - foundIndex
+        foundIndex = -1
+      }
+    }
+  } else {
+    if (byteOffset + valLength > arrLength) byteOffset = arrLength - valLength
+    for (i = byteOffset; i >= 0; i--) {
+      var found = true
+      for (var j = 0; j < valLength; j++) {
+        if (read(arr, i + j) !== read(val, j)) {
+          found = false
+          break
+        }
+      }
+      if (found) return i
+    }
+  }
+
+  return -1
+}
+
+Buffer.prototype.includes = function includes (val, byteOffset, encoding) {
+  return this.indexOf(val, byteOffset, encoding) !== -1
+}
+
+Buffer.prototype.indexOf = function indexOf (val, byteOffset, encoding) {
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, true)
+}
+
+Buffer.prototype.lastIndexOf = function lastIndexOf (val, byteOffset, encoding) {
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, false)
+}
+
+function hexWrite (buf, string, offset, length) {
+  offset = Number(offset) || 0
+  var remaining = buf.length - offset
+  if (!length) {
+    length = remaining
+  } else {
+    length = Number(length)
+    if (length > remaining) {
+      length = remaining
+    }
+  }
+
+  // must be an even number of digits
+  var strLen = string.length
+  if (strLen % 2 !== 0) throw new TypeError('Invalid hex string')
+
+  if (length > strLen / 2) {
+    length = strLen / 2
+  }
+  for (var i = 0; i < length; ++i) {
+    var parsed = parseInt(string.substr(i * 2, 2), 16)
+    if (numberIsNaN(parsed)) return i
+    buf[offset + i] = parsed
+  }
+  return i
+}
+
+function utf8Write (buf, string, offset, length) {
+  return blitBuffer(utf8ToBytes(string, buf.length - offset), buf, offset, length)
+}
+
+function asciiWrite (buf, string, offset, length) {
+  return blitBuffer(asciiToBytes(string), buf, offset, length)
+}
+
+function latin1Write (buf, string, offset, length) {
+  return asciiWrite(buf, string, offset, length)
+}
+
+function base64Write (buf, string, offset, length) {
+  return blitBuffer(base64ToBytes(string), buf, offset, length)
+}
+
+function ucs2Write (buf, string, offset, length) {
+  return blitBuffer(utf16leToBytes(string, buf.length - offset), buf, offset, length)
+}
+
+Buffer.prototype.write = function write (string, offset, length, encoding) {
+  // Buffer#write(string)
+  if (offset === undefined) {
+    encoding = 'utf8'
+    length = this.length
+    offset = 0
+  // Buffer#write(string, encoding)
+  } else if (length === undefined && typeof offset === 'string') {
+    encoding = offset
+    length = this.length
+    offset = 0
+  // Buffer#write(string, offset[, length][, encoding])
+  } else if (isFinite(offset)) {
+    offset = offset >>> 0
+    if (isFinite(length)) {
+      length = length >>> 0
+      if (encoding === undefined) encoding = 'utf8'
+    } else {
+      encoding = length
+      length = undefined
+    }
+  } else {
+    throw new Error(
+      'Buffer.write(string, encoding, offset[, length]) is no longer supported'
+    )
+  }
+
+  var remaining = this.length - offset
+  if (length === undefined || length > remaining) length = remaining
+
+  if ((string.length > 0 && (length < 0 || offset < 0)) || offset > this.length) {
+    throw new RangeError('Attempt to write outside buffer bounds')
+  }
+
+  if (!encoding) encoding = 'utf8'
+
+  var loweredCase = false
+  for (;;) {
+    switch (encoding) {
+      case 'hex':
+        return hexWrite(this, string, offset, length)
+
+      case 'utf8':
+      case 'utf-8':
+        return utf8Write(this, string, offset, length)
+
+      case 'ascii':
+        return asciiWrite(this, string, offset, length)
+
+      case 'latin1':
+      case 'binary':
+        return latin1Write(this, string, offset, length)
+
+      case 'base64':
+        // Warning: maxLength not taken into account in base64Write
+        return base64Write(this, string, offset, length)
+
+      case 'ucs2':
+      case 'ucs-2':
+      case 'utf16le':
+      case 'utf-16le':
+        return ucs2Write(this, string, offset, length)
+
+      default:
+        if (loweredCase) throw new TypeError('Unknown encoding: ' + encoding)
+        encoding = ('' + encoding).toLowerCase()
+        loweredCase = true
+    }
+  }
+}
+
+Buffer.prototype.toJSON = function toJSON () {
+  return {
+    type: 'Buffer',
+    data: Array.prototype.slice.call(this._arr || this, 0)
+  }
+}
+
+function base64Slice (buf, start, end) {
+  if (start === 0 && end === buf.length) {
+    return base64.fromByteArray(buf)
+  } else {
+    return base64.fromByteArray(buf.slice(start, end))
+  }
+}
+
+function utf8Slice (buf, start, end) {
+  end = Math.min(buf.length, end)
+  var res = []
+
+  var i = start
+  while (i < end) {
+    var firstByte = buf[i]
+    var codePoint = null
+    var bytesPerSequence = (firstByte > 0xEF) ? 4
+      : (firstByte > 0xDF) ? 3
+      : (firstByte > 0xBF) ? 2
+      : 1
+
+    if (i + bytesPerSequence <= end) {
+      var secondByte, thirdByte, fourthByte, tempCodePoint
+
+      switch (bytesPerSequence) {
+        case 1:
+          if (firstByte < 0x80) {
+            codePoint = firstByte
+          }
+          break
+        case 2:
+          secondByte = buf[i + 1]
+          if ((secondByte & 0xC0) === 0x80) {
+            tempCodePoint = (firstByte & 0x1F) << 0x6 | (secondByte & 0x3F)
+            if (tempCodePoint > 0x7F) {
+              codePoint = tempCodePoint
+            }
+          }
+          break
+        case 3:
+          secondByte = buf[i + 1]
+          thirdByte = buf[i + 2]
+          if ((secondByte & 0xC0) === 0x80 && (thirdByte & 0xC0) === 0x80) {
+            tempCodePoint = (firstByte & 0xF) << 0xC | (secondByte & 0x3F) << 0x6 | (thirdByte & 0x3F)
+            if (tempCodePoint > 0x7FF && (tempCodePoint < 0xD800 || tempCodePoint > 0xDFFF)) {
+              codePoint = tempCodePoint
+            }
+          }
+          break
+        case 4:
+          secondByte = buf[i + 1]
+          thirdByte = buf[i + 2]
+          fourthByte = buf[i + 3]
+          if ((secondByte & 0xC0) === 0x80 && (thirdByte & 0xC0) === 0x80 && (fourthByte & 0xC0) === 0x80) {
+            tempCodePoint = (firstByte & 0xF) << 0x12 | (secondByte & 0x3F) << 0xC | (thirdByte & 0x3F) << 0x6 | (fourthByte & 0x3F)
+            if (tempCodePoint > 0xFFFF && tempCodePoint < 0x110000) {
+              codePoint = tempCodePoint
+            }
+          }
+      }
+    }
+
+    if (codePoint === null) {
+      // we did not generate a valid codePoint so insert a
+      // replacement char (U+FFFD) and advance only 1 byte
+      codePoint = 0xFFFD
+      bytesPerSequence = 1
+    } else if (codePoint > 0xFFFF) {
+      // encode to utf16 (surrogate pair dance)
+      codePoint -= 0x10000
+      res.push(codePoint >>> 10 & 0x3FF | 0xD800)
+      codePoint = 0xDC00 | codePoint & 0x3FF
+    }
+
+    res.push(codePoint)
+    i += bytesPerSequence
+  }
+
+  return decodeCodePointsArray(res)
+}
+
+// Based on http://stackoverflow.com/a/22747272/680742, the browser with
+// the lowest limit is Chrome, with 0x10000 args.
+// We go 1 magnitude less, for safety
+var MAX_ARGUMENTS_LENGTH = 0x1000
+
+function decodeCodePointsArray (codePoints) {
+  var len = codePoints.length
+  if (len <= MAX_ARGUMENTS_LENGTH) {
+    return String.fromCharCode.apply(String, codePoints) // avoid extra slice()
+  }
+
+  // Decode in chunks to avoid "call stack size exceeded".
+  var res = ''
+  var i = 0
+  while (i < len) {
+    res += String.fromCharCode.apply(
+      String,
+      codePoints.slice(i, i += MAX_ARGUMENTS_LENGTH)
+    )
+  }
+  return res
+}
+
+function asciiSlice (buf, start, end) {
+  var ret = ''
+  end = Math.min(buf.length, end)
+
+  for (var i = start; i < end; ++i) {
+    ret += String.fromCharCode(buf[i] & 0x7F)
+  }
+  return ret
+}
+
+function latin1Slice (buf, start, end) {
+  var ret = ''
+  end = Math.min(buf.length, end)
+
+  for (var i = start; i < end; ++i) {
+    ret += String.fromCharCode(buf[i])
+  }
+  return ret
+}
+
+function hexSlice (buf, start, end) {
+  var len = buf.length
+
+  if (!start || start < 0) start = 0
+  if (!end || end < 0 || end > len) end = len
+
+  var out = ''
+  for (var i = start; i < end; ++i) {
+    out += toHex(buf[i])
+  }
+  return out
+}
+
+function utf16leSlice (buf, start, end) {
+  var bytes = buf.slice(start, end)
+  var res = ''
+  for (var i = 0; i < bytes.length; i += 2) {
+    res += String.fromCharCode(bytes[i] + (bytes[i + 1] * 256))
+  }
+  return res
+}
+
+Buffer.prototype.slice = function slice (start, end) {
+  var len = this.length
+  start = ~~start
+  end = end === undefined ? len : ~~end
+
+  if (start < 0) {
+    start += len
+    if (start < 0) start = 0
+  } else if (start > len) {
+    start = len
+  }
+
+  if (end < 0) {
+    end += len
+    if (end < 0) end = 0
+  } else if (end > len) {
+    end = len
+  }
+
+  if (end < start) end = start
+
+  var newBuf = this.subarray(start, end)
+  // Return an augmented `Uint8Array` instance
+  newBuf.__proto__ = Buffer.prototype
+  return newBuf
+}
+
+/*
+ * Need to make sure that buffer isn't trying to write out of bounds.
+ */
+function checkOffset (offset, ext, length) {
+  if ((offset % 1) !== 0 || offset < 0) throw new RangeError('offset is not uint')
+  if (offset + ext > length) throw new RangeError('Trying to access beyond buffer length')
+}
+
+Buffer.prototype.readUIntLE = function readUIntLE (offset, byteLength, noAssert) {
+  offset = offset >>> 0
+  byteLength = byteLength >>> 0
+  if (!noAssert) checkOffset(offset, byteLength, this.length)
+
+  var val = this[offset]
+  var mul = 1
+  var i = 0
+  while (++i < byteLength && (mul *= 0x100)) {
+    val += this[offset + i] * mul
+  }
+
+  return val
+}
+
+Buffer.prototype.readUIntBE = function readUIntBE (offset, byteLength, noAssert) {
+  offset = offset >>> 0
+  byteLength = byteLength >>> 0
+  if (!noAssert) {
+    checkOffset(offset, byteLength, this.length)
+  }
+
+  var val = this[offset + --byteLength]
+  var mul = 1
+  while (byteLength > 0 && (mul *= 0x100)) {
+    val += this[offset + --byteLength] * mul
+  }
+
+  return val
+}
+
+Buffer.prototype.readUInt8 = function readUInt8 (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 1, this.length)
+  return this[offset]
+}
+
+Buffer.prototype.readUInt16LE = function readUInt16LE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 2, this.length)
+  return this[offset] | (this[offset + 1] << 8)
+}
+
+Buffer.prototype.readUInt16BE = function readUInt16BE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 2, this.length)
+  return (this[offset] << 8) | this[offset + 1]
+}
+
+Buffer.prototype.readUInt32LE = function readUInt32LE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 4, this.length)
+
+  return ((this[offset]) |
+      (this[offset + 1] << 8) |
+      (this[offset + 2] << 16)) +
+      (this[offset + 3] * 0x1000000)
+}
+
+Buffer.prototype.readUInt32BE = function readUInt32BE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 4, this.length)
+
+  return (this[offset] * 0x1000000) +
+    ((this[offset + 1] << 16) |
+    (this[offset + 2] << 8) |
+    this[offset + 3])
+}
+
+Buffer.prototype.readIntLE = function readIntLE (offset, byteLength, noAssert) {
+  offset = offset >>> 0
+  byteLength = byteLength >>> 0
+  if (!noAssert) checkOffset(offset, byteLength, this.length)
+
+  var val = this[offset]
+  var mul = 1
+  var i = 0
+  while (++i < byteLength && (mul *= 0x100)) {
+    val += this[offset + i] * mul
+  }
+  mul *= 0x80
+
+  if (val >= mul) val -= Math.pow(2, 8 * byteLength)
+
+  return val
+}
+
+Buffer.prototype.readIntBE = function readIntBE (offset, byteLength, noAssert) {
+  offset = offset >>> 0
+  byteLength = byteLength >>> 0
+  if (!noAssert) checkOffset(offset, byteLength, this.length)
+
+  var i = byteLength
+  var mul = 1
+  var val = this[offset + --i]
+  while (i > 0 && (mul *= 0x100)) {
+    val += this[offset + --i] * mul
+  }
+  mul *= 0x80
+
+  if (val >= mul) val -= Math.pow(2, 8 * byteLength)
+
+  return val
+}
+
+Buffer.prototype.readInt8 = function readInt8 (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 1, this.length)
+  if (!(this[offset] & 0x80)) return (this[offset])
+  return ((0xff - this[offset] + 1) * -1)
+}
+
+Buffer.prototype.readInt16LE = function readInt16LE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 2, this.length)
+  var val = this[offset] | (this[offset + 1] << 8)
+  return (val & 0x8000) ? val | 0xFFFF0000 : val
+}
+
+Buffer.prototype.readInt16BE = function readInt16BE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 2, this.length)
+  var val = this[offset + 1] | (this[offset] << 8)
+  return (val & 0x8000) ? val | 0xFFFF0000 : val
+}
+
+Buffer.prototype.readInt32LE = function readInt32LE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 4, this.length)
+
+  return (this[offset]) |
+    (this[offset + 1] << 8) |
+    (this[offset + 2] << 16) |
+    (this[offset + 3] << 24)
+}
+
+Buffer.prototype.readInt32BE = function readInt32BE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 4, this.length)
+
+  return (this[offset] << 24) |
+    (this[offset + 1] << 16) |
+    (this[offset + 2] << 8) |
+    (this[offset + 3])
+}
+
+Buffer.prototype.readFloatLE = function readFloatLE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 4, this.length)
+  return ieee754.read(this, offset, true, 23, 4)
+}
+
+Buffer.prototype.readFloatBE = function readFloatBE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 4, this.length)
+  return ieee754.read(this, offset, false, 23, 4)
+}
+
+Buffer.prototype.readDoubleLE = function readDoubleLE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 8, this.length)
+  return ieee754.read(this, offset, true, 52, 8)
+}
+
+Buffer.prototype.readDoubleBE = function readDoubleBE (offset, noAssert) {
+  offset = offset >>> 0
+  if (!noAssert) checkOffset(offset, 8, this.length)
+  return ieee754.read(this, offset, false, 52, 8)
+}
+
+function checkInt (buf, value, offset, ext, max, min) {
+  if (!Buffer.isBuffer(buf)) throw new TypeError('"buffer" argument must be a Buffer instance')
+  if (value > max || value < min) throw new RangeError('"value" argument is out of bounds')
+  if (offset + ext > buf.length) throw new RangeError('Index out of range')
+}
+
+Buffer.prototype.writeUIntLE = function writeUIntLE (value, offset, byteLength, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  byteLength = byteLength >>> 0
+  if (!noAssert) {
+    var maxBytes = Math.pow(2, 8 * byteLength) - 1
+    checkInt(this, value, offset, byteLength, maxBytes, 0)
+  }
+
+  var mul = 1
+  var i = 0
+  this[offset] = value & 0xFF
+  while (++i < byteLength && (mul *= 0x100)) {
+    this[offset + i] = (value / mul) & 0xFF
+  }
+
+  return offset + byteLength
+}
+
+Buffer.prototype.writeUIntBE = function writeUIntBE (value, offset, byteLength, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  byteLength = byteLength >>> 0
+  if (!noAssert) {
+    var maxBytes = Math.pow(2, 8 * byteLength) - 1
+    checkInt(this, value, offset, byteLength, maxBytes, 0)
+  }
+
+  var i = byteLength - 1
+  var mul = 1
+  this[offset + i] = value & 0xFF
+  while (--i >= 0 && (mul *= 0x100)) {
+    this[offset + i] = (value / mul) & 0xFF
+  }
+
+  return offset + byteLength
+}
+
+Buffer.prototype.writeUInt8 = function writeUInt8 (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 1, 0xff, 0)
+  this[offset] = (value & 0xff)
+  return offset + 1
+}
+
+Buffer.prototype.writeUInt16LE = function writeUInt16LE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 2, 0xffff, 0)
+  this[offset] = (value & 0xff)
+  this[offset + 1] = (value >>> 8)
+  return offset + 2
+}
+
+Buffer.prototype.writeUInt16BE = function writeUInt16BE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 2, 0xffff, 0)
+  this[offset] = (value >>> 8)
+  this[offset + 1] = (value & 0xff)
+  return offset + 2
+}
+
+Buffer.prototype.writeUInt32LE = function writeUInt32LE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 4, 0xffffffff, 0)
+  this[offset + 3] = (value >>> 24)
+  this[offset + 2] = (value >>> 16)
+  this[offset + 1] = (value >>> 8)
+  this[offset] = (value & 0xff)
+  return offset + 4
+}
+
+Buffer.prototype.writeUInt32BE = function writeUInt32BE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 4, 0xffffffff, 0)
+  this[offset] = (value >>> 24)
+  this[offset + 1] = (value >>> 16)
+  this[offset + 2] = (value >>> 8)
+  this[offset + 3] = (value & 0xff)
+  return offset + 4
+}
+
+Buffer.prototype.writeIntLE = function writeIntLE (value, offset, byteLength, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) {
+    var limit = Math.pow(2, (8 * byteLength) - 1)
+
+    checkInt(this, value, offset, byteLength, limit - 1, -limit)
+  }
+
+  var i = 0
+  var mul = 1
+  var sub = 0
+  this[offset] = value & 0xFF
+  while (++i < byteLength && (mul *= 0x100)) {
+    if (value < 0 && sub === 0 && this[offset + i - 1] !== 0) {
+      sub = 1
+    }
+    this[offset + i] = ((value / mul) >> 0) - sub & 0xFF
+  }
+
+  return offset + byteLength
+}
+
+Buffer.prototype.writeIntBE = function writeIntBE (value, offset, byteLength, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) {
+    var limit = Math.pow(2, (8 * byteLength) - 1)
+
+    checkInt(this, value, offset, byteLength, limit - 1, -limit)
+  }
+
+  var i = byteLength - 1
+  var mul = 1
+  var sub = 0
+  this[offset + i] = value & 0xFF
+  while (--i >= 0 && (mul *= 0x100)) {
+    if (value < 0 && sub === 0 && this[offset + i + 1] !== 0) {
+      sub = 1
+    }
+    this[offset + i] = ((value / mul) >> 0) - sub & 0xFF
+  }
+
+  return offset + byteLength
+}
+
+Buffer.prototype.writeInt8 = function writeInt8 (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 1, 0x7f, -0x80)
+  if (value < 0) value = 0xff + value + 1
+  this[offset] = (value & 0xff)
+  return offset + 1
+}
+
+Buffer.prototype.writeInt16LE = function writeInt16LE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 2, 0x7fff, -0x8000)
+  this[offset] = (value & 0xff)
+  this[offset + 1] = (value >>> 8)
+  return offset + 2
+}
+
+Buffer.prototype.writeInt16BE = function writeInt16BE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 2, 0x7fff, -0x8000)
+  this[offset] = (value >>> 8)
+  this[offset + 1] = (value & 0xff)
+  return offset + 2
+}
+
+Buffer.prototype.writeInt32LE = function writeInt32LE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000)
+  this[offset] = (value & 0xff)
+  this[offset + 1] = (value >>> 8)
+  this[offset + 2] = (value >>> 16)
+  this[offset + 3] = (value >>> 24)
+  return offset + 4
+}
+
+Buffer.prototype.writeInt32BE = function writeInt32BE (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000)
+  if (value < 0) value = 0xffffffff + value + 1
+  this[offset] = (value >>> 24)
+  this[offset + 1] = (value >>> 16)
+  this[offset + 2] = (value >>> 8)
+  this[offset + 3] = (value & 0xff)
+  return offset + 4
+}
+
+function checkIEEE754 (buf, value, offset, ext, max, min) {
+  if (offset + ext > buf.length) throw new RangeError('Index out of range')
+  if (offset < 0) throw new RangeError('Index out of range')
+}
+
+function writeFloat (buf, value, offset, littleEndian, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) {
+    checkIEEE754(buf, value, offset, 4, 3.4028234663852886e+38, -3.4028234663852886e+38)
+  }
+  ieee754.write(buf, value, offset, littleEndian, 23, 4)
+  return offset + 4
+}
+
+Buffer.prototype.writeFloatLE = function writeFloatLE (value, offset, noAssert) {
+  return writeFloat(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeFloatBE = function writeFloatBE (value, offset, noAssert) {
+  return writeFloat(this, value, offset, false, noAssert)
+}
+
+function writeDouble (buf, value, offset, littleEndian, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert) {
+    checkIEEE754(buf, value, offset, 8, 1.7976931348623157E+308, -1.7976931348623157E+308)
+  }
+  ieee754.write(buf, value, offset, littleEndian, 52, 8)
+  return offset + 8
+}
+
+Buffer.prototype.writeDoubleLE = function writeDoubleLE (value, offset, noAssert) {
+  return writeDouble(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeDoubleBE = function writeDoubleBE (value, offset, noAssert) {
+  return writeDouble(this, value, offset, false, noAssert)
+}
+
+// copy(targetBuffer, targetStart=0, sourceStart=0, sourceEnd=buffer.length)
+Buffer.prototype.copy = function copy (target, targetStart, start, end) {
+  if (!start) start = 0
+  if (!end && end !== 0) end = this.length
+  if (targetStart >= target.length) targetStart = target.length
+  if (!targetStart) targetStart = 0
+  if (end > 0 && end < start) end = start
+
+  // Copy 0 bytes; we're done
+  if (end === start) return 0
+  if (target.length === 0 || this.length === 0) return 0
+
+  // Fatal error conditions
+  if (targetStart < 0) {
+    throw new RangeError('targetStart out of bounds')
+  }
+  if (start < 0 || start >= this.length) throw new RangeError('sourceStart out of bounds')
+  if (end < 0) throw new RangeError('sourceEnd out of bounds')
+
+  // Are we oob?
+  if (end > this.length) end = this.length
+  if (target.length - targetStart < end - start) {
+    end = target.length - targetStart + start
+  }
+
+  var len = end - start
+  var i
+
+  if (this === target && start < targetStart && targetStart < end) {
+    // descending copy from end
+    for (i = len - 1; i >= 0; --i) {
+      target[i + targetStart] = this[i + start]
+    }
+  } else if (len < 1000) {
+    // ascending copy from start
+    for (i = 0; i < len; ++i) {
+      target[i + targetStart] = this[i + start]
+    }
+  } else {
+    Uint8Array.prototype.set.call(
+      target,
+      this.subarray(start, start + len),
+      targetStart
+    )
+  }
+
+  return len
+}
+
+// Usage:
+//    buffer.fill(number[, offset[, end]])
+//    buffer.fill(buffer[, offset[, end]])
+//    buffer.fill(string[, offset[, end]][, encoding])
+Buffer.prototype.fill = function fill (val, start, end, encoding) {
+  // Handle string cases:
+  if (typeof val === 'string') {
+    if (typeof start === 'string') {
+      encoding = start
+      start = 0
+      end = this.length
+    } else if (typeof end === 'string') {
+      encoding = end
+      end = this.length
+    }
+    if (val.length === 1) {
+      var code = val.charCodeAt(0)
+      if (code < 256) {
+        val = code
+      }
+    }
+    if (encoding !== undefined && typeof encoding !== 'string') {
+      throw new TypeError('encoding must be a string')
+    }
+    if (typeof encoding === 'string' && !Buffer.isEncoding(encoding)) {
+      throw new TypeError('Unknown encoding: ' + encoding)
+    }
+  } else if (typeof val === 'number') {
+    val = val & 255
+  }
+
+  // Invalid ranges are not set to a default, so can range check early.
+  if (start < 0 || this.length < start || this.length < end) {
+    throw new RangeError('Out of range index')
+  }
+
+  if (end <= start) {
+    return this
+  }
+
+  start = start >>> 0
+  end = end === undefined ? this.length : end >>> 0
+
+  if (!val) val = 0
+
+  var i
+  if (typeof val === 'number') {
+    for (i = start; i < end; ++i) {
+      this[i] = val
+    }
+  } else {
+    var bytes = Buffer.isBuffer(val)
+      ? val
+      : new Buffer(val, encoding)
+    var len = bytes.length
+    for (i = 0; i < end - start; ++i) {
+      this[i + start] = bytes[i % len]
+    }
+  }
+
+  return this
+}
+
+// HELPER FUNCTIONS
+// ================
+
+var INVALID_BASE64_RE = /[^+/0-9A-Za-z-_]/g
+
+function base64clean (str) {
+  // Node strips out invalid characters like \n and \t from the string, base64-js does not
+  str = str.trim().replace(INVALID_BASE64_RE, '')
+  // Node converts strings with length < 2 to ''
+  if (str.length < 2) return ''
+  // Node allows for non-padded base64 strings (missing trailing ===), base64-js does not
+  while (str.length % 4 !== 0) {
+    str = str + '='
+  }
+  return str
+}
+
+function toHex (n) {
+  if (n < 16) return '0' + n.toString(16)
+  return n.toString(16)
+}
+
+function utf8ToBytes (string, units) {
+  units = units || Infinity
+  var codePoint
+  var length = string.length
+  var leadSurrogate = null
+  var bytes = []
+
+  for (var i = 0; i < length; ++i) {
+    codePoint = string.charCodeAt(i)
+
+    // is surrogate component
+    if (codePoint > 0xD7FF && codePoint < 0xE000) {
+      // last char was a lead
+      if (!leadSurrogate) {
+        // no lead yet
+        if (codePoint > 0xDBFF) {
+          // unexpected trail
+          if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
+          continue
+        } else if (i + 1 === length) {
+          // unpaired lead
+          if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
+          continue
+        }
+
+        // valid lead
+        leadSurrogate = codePoint
+
+        continue
+      }
+
+      // 2 leads in a row
+      if (codePoint < 0xDC00) {
+        if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
+        leadSurrogate = codePoint
+        continue
+      }
+
+      // valid surrogate pair
+      codePoint = (leadSurrogate - 0xD800 << 10 | codePoint - 0xDC00) + 0x10000
+    } else if (leadSurrogate) {
+      // valid bmp char, but last char was a lead
+      if ((units -= 3) > -1) bytes.push(0xEF, 0xBF, 0xBD)
+    }
+
+    leadSurrogate = null
+
+    // encode utf8
+    if (codePoint < 0x80) {
+      if ((units -= 1) < 0) break
+      bytes.push(codePoint)
+    } else if (codePoint < 0x800) {
+      if ((units -= 2) < 0) break
+      bytes.push(
+        codePoint >> 0x6 | 0xC0,
+        codePoint & 0x3F | 0x80
+      )
+    } else if (codePoint < 0x10000) {
+      if ((units -= 3) < 0) break
+      bytes.push(
+        codePoint >> 0xC | 0xE0,
+        codePoint >> 0x6 & 0x3F | 0x80,
+        codePoint & 0x3F | 0x80
+      )
+    } else if (codePoint < 0x110000) {
+      if ((units -= 4) < 0) break
+      bytes.push(
+        codePoint >> 0x12 | 0xF0,
+        codePoint >> 0xC & 0x3F | 0x80,
+        codePoint >> 0x6 & 0x3F | 0x80,
+        codePoint & 0x3F | 0x80
+      )
+    } else {
+      throw new Error('Invalid code point')
+    }
+  }
+
+  return bytes
+}
+
+function asciiToBytes (str) {
+  var byteArray = []
+  for (var i = 0; i < str.length; ++i) {
+    // Node's code seems to be doing this and not & 0x7F..
+    byteArray.push(str.charCodeAt(i) & 0xFF)
+  }
+  return byteArray
+}
+
+function utf16leToBytes (str, units) {
+  var c, hi, lo
+  var byteArray = []
+  for (var i = 0; i < str.length; ++i) {
+    if ((units -= 2) < 0) break
+
+    c = str.charCodeAt(i)
+    hi = c >> 8
+    lo = c % 256
+    byteArray.push(lo)
+    byteArray.push(hi)
+  }
+
+  return byteArray
+}
+
+function base64ToBytes (str) {
+  return base64.toByteArray(base64clean(str))
+}
+
+function blitBuffer (src, dst, offset, length) {
+  for (var i = 0; i < length; ++i) {
+    if ((i + offset >= dst.length) || (i >= src.length)) break
+    dst[i + offset] = src[i]
+  }
+  return i
+}
+
+// Node 0.10 supports `ArrayBuffer` but lacks `ArrayBuffer.isView`
+function isArrayBufferView (obj) {
+  return (typeof ArrayBuffer.isView === 'function') && ArrayBuffer.isView(obj)
+}
+
+function numberIsNaN (obj) {
+  return obj !== obj // eslint-disable-line no-self-compare
+}
+
+},{"base64-js":13,"ieee754":14}],13:[function(require,module,exports){
+'use strict'
+
+exports.byteLength = byteLength
+exports.toByteArray = toByteArray
+exports.fromByteArray = fromByteArray
+
+var lookup = []
+var revLookup = []
+var Arr = typeof Uint8Array !== 'undefined' ? Uint8Array : Array
+
+var code = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+for (var i = 0, len = code.length; i < len; ++i) {
+  lookup[i] = code[i]
+  revLookup[code.charCodeAt(i)] = i
+}
+
+revLookup['-'.charCodeAt(0)] = 62
+revLookup['_'.charCodeAt(0)] = 63
+
+function placeHoldersCount (b64) {
+  var len = b64.length
+  if (len % 4 > 0) {
+    throw new Error('Invalid string. Length must be a multiple of 4')
+  }
+
+  // the number of equal signs (place holders)
+  // if there are two placeholders, than the two characters before it
+  // represent one byte
+  // if there is only one, then the three characters before it represent 2 bytes
+  // this is just a cheap hack to not do indexOf twice
+  return b64[len - 2] === '=' ? 2 : b64[len - 1] === '=' ? 1 : 0
+}
+
+function byteLength (b64) {
+  // base64 is 4/3 + up to two characters of the original data
+  return b64.length * 3 / 4 - placeHoldersCount(b64)
+}
+
+function toByteArray (b64) {
+  var i, j, l, tmp, placeHolders, arr
+  var len = b64.length
+  placeHolders = placeHoldersCount(b64)
+
+  arr = new Arr(len * 3 / 4 - placeHolders)
+
+  // if there are placeholders, only get up to the last complete 4 chars
+  l = placeHolders > 0 ? len - 4 : len
+
+  var L = 0
+
+  for (i = 0, j = 0; i < l; i += 4, j += 3) {
+    tmp = (revLookup[b64.charCodeAt(i)] << 18) | (revLookup[b64.charCodeAt(i + 1)] << 12) | (revLookup[b64.charCodeAt(i + 2)] << 6) | revLookup[b64.charCodeAt(i + 3)]
+    arr[L++] = (tmp >> 16) & 0xFF
+    arr[L++] = (tmp >> 8) & 0xFF
+    arr[L++] = tmp & 0xFF
+  }
+
+  if (placeHolders === 2) {
+    tmp = (revLookup[b64.charCodeAt(i)] << 2) | (revLookup[b64.charCodeAt(i + 1)] >> 4)
+    arr[L++] = tmp & 0xFF
+  } else if (placeHolders === 1) {
+    tmp = (revLookup[b64.charCodeAt(i)] << 10) | (revLookup[b64.charCodeAt(i + 1)] << 4) | (revLookup[b64.charCodeAt(i + 2)] >> 2)
+    arr[L++] = (tmp >> 8) & 0xFF
+    arr[L++] = tmp & 0xFF
+  }
+
+  return arr
+}
+
+function tripletToBase64 (num) {
+  return lookup[num >> 18 & 0x3F] + lookup[num >> 12 & 0x3F] + lookup[num >> 6 & 0x3F] + lookup[num & 0x3F]
+}
+
+function encodeChunk (uint8, start, end) {
+  var tmp
+  var output = []
+  for (var i = start; i < end; i += 3) {
+    tmp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2])
+    output.push(tripletToBase64(tmp))
+  }
+  return output.join('')
+}
+
+function fromByteArray (uint8) {
+  var tmp
+  var len = uint8.length
+  var extraBytes = len % 3 // if we have 1 byte left, pad 2 bytes
+  var output = ''
+  var parts = []
+  var maxChunkLength = 16383 // must be multiple of 3
+
+  // go through the array every three bytes, we'll deal with trailing stuff later
+  for (var i = 0, len2 = len - extraBytes; i < len2; i += maxChunkLength) {
+    parts.push(encodeChunk(uint8, i, (i + maxChunkLength) > len2 ? len2 : (i + maxChunkLength)))
+  }
+
+  // pad the end with zeros, but make sure to not forget the extra bytes
+  if (extraBytes === 1) {
+    tmp = uint8[len - 1]
+    output += lookup[tmp >> 2]
+    output += lookup[(tmp << 4) & 0x3F]
+    output += '=='
+  } else if (extraBytes === 2) {
+    tmp = (uint8[len - 2] << 8) + (uint8[len - 1])
+    output += lookup[tmp >> 10]
+    output += lookup[(tmp >> 4) & 0x3F]
+    output += lookup[(tmp << 2) & 0x3F]
+    output += '='
+  }
+
+  parts.push(output)
+
+  return parts.join('')
+}
+
+},{}],14:[function(require,module,exports){
+exports.read = function (buffer, offset, isLE, mLen, nBytes) {
+  var e, m
+  var eLen = nBytes * 8 - mLen - 1
+  var eMax = (1 << eLen) - 1
+  var eBias = eMax >> 1
+  var nBits = -7
+  var i = isLE ? (nBytes - 1) : 0
+  var d = isLE ? -1 : 1
+  var s = buffer[offset + i]
+
+  i += d
+
+  e = s & ((1 << (-nBits)) - 1)
+  s >>= (-nBits)
+  nBits += eLen
+  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8) {}
+
+  m = e & ((1 << (-nBits)) - 1)
+  e >>= (-nBits)
+  nBits += mLen
+  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8) {}
+
+  if (e === 0) {
+    e = 1 - eBias
+  } else if (e === eMax) {
+    return m ? NaN : ((s ? -1 : 1) * Infinity)
+  } else {
+    m = m + Math.pow(2, mLen)
+    e = e - eBias
+  }
+  return (s ? -1 : 1) * m * Math.pow(2, e - mLen)
+}
+
+exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
+  var e, m, c
+  var eLen = nBytes * 8 - mLen - 1
+  var eMax = (1 << eLen) - 1
+  var eBias = eMax >> 1
+  var rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0)
+  var i = isLE ? 0 : (nBytes - 1)
+  var d = isLE ? 1 : -1
+  var s = value < 0 || (value === 0 && 1 / value < 0) ? 1 : 0
+
+  value = Math.abs(value)
+
+  if (isNaN(value) || value === Infinity) {
+    m = isNaN(value) ? 1 : 0
+    e = eMax
+  } else {
+    e = Math.floor(Math.log(value) / Math.LN2)
+    if (value * (c = Math.pow(2, -e)) < 1) {
+      e--
+      c *= 2
+    }
+    if (e + eBias >= 1) {
+      value += rt / c
+    } else {
+      value += rt * Math.pow(2, 1 - eBias)
+    }
+    if (value * c >= 2) {
+      e++
+      c /= 2
+    }
+
+    if (e + eBias >= eMax) {
+      m = 0
+      e = eMax
+    } else if (e + eBias >= 1) {
+      m = (value * c - 1) * Math.pow(2, mLen)
+      e = e + eBias
+    } else {
+      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen)
+      e = 0
+    }
+  }
+
+  for (; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8) {}
+
+  e = (e << mLen) | m
+  eLen += mLen
+  for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8) {}
+
+  buffer[offset + i - d] |= s * 128
+}
+
+},{}],15:[function(require,module,exports){
+(function (process){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+// resolves . and .. elements in a path array with directory names there
+// must be no slashes, empty elements, or device names (c:\) in the array
+// (so also no leading and trailing slashes - it does not distinguish
+// relative and absolute paths)
+function normalizeArray(parts, allowAboveRoot) {
+  // if the path tries to go above the root, `up` ends up > 0
+  var up = 0;
+  for (var i = parts.length - 1; i >= 0; i--) {
+    var last = parts[i];
+    if (last === '.') {
+      parts.splice(i, 1);
+    } else if (last === '..') {
+      parts.splice(i, 1);
+      up++;
+    } else if (up) {
+      parts.splice(i, 1);
+      up--;
+    }
+  }
+
+  // if the path is allowed to go above the root, restore leading ..s
+  if (allowAboveRoot) {
+    for (; up--; up) {
+      parts.unshift('..');
+    }
+  }
+
+  return parts;
+}
+
+// Split a filename into [root, dir, basename, ext], unix version
+// 'root' is just a slash, or nothing.
+var splitPathRe =
+    /^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;
+var splitPath = function(filename) {
+  return splitPathRe.exec(filename).slice(1);
+};
+
+// path.resolve([from ...], to)
+// posix version
+exports.resolve = function() {
+  var resolvedPath = '',
+      resolvedAbsolute = false;
+
+  for (var i = arguments.length - 1; i >= -1 && !resolvedAbsolute; i--) {
+    var path = (i >= 0) ? arguments[i] : process.cwd();
+
+    // Skip empty and invalid entries
+    if (typeof path !== 'string') {
+      throw new TypeError('Arguments to path.resolve must be strings');
+    } else if (!path) {
+      continue;
+    }
+
+    resolvedPath = path + '/' + resolvedPath;
+    resolvedAbsolute = path.charAt(0) === '/';
+  }
+
+  // At this point the path should be resolved to a full absolute path, but
+  // handle relative paths to be safe (might happen when process.cwd() fails)
+
+  // Normalize the path
+  resolvedPath = normalizeArray(filter(resolvedPath.split('/'), function(p) {
+    return !!p;
+  }), !resolvedAbsolute).join('/');
+
+  return ((resolvedAbsolute ? '/' : '') + resolvedPath) || '.';
+};
+
+// path.normalize(path)
+// posix version
+exports.normalize = function(path) {
+  var isAbsolute = exports.isAbsolute(path),
+      trailingSlash = substr(path, -1) === '/';
+
+  // Normalize the path
+  path = normalizeArray(filter(path.split('/'), function(p) {
+    return !!p;
+  }), !isAbsolute).join('/');
+
+  if (!path && !isAbsolute) {
+    path = '.';
+  }
+  if (path && trailingSlash) {
+    path += '/';
+  }
+
+  return (isAbsolute ? '/' : '') + path;
+};
+
+// posix version
+exports.isAbsolute = function(path) {
+  return path.charAt(0) === '/';
+};
+
+// posix version
+exports.join = function() {
+  var paths = Array.prototype.slice.call(arguments, 0);
+  return exports.normalize(filter(paths, function(p, index) {
+    if (typeof p !== 'string') {
+      throw new TypeError('Arguments to path.join must be strings');
+    }
+    return p;
+  }).join('/'));
+};
+
+
+// path.relative(from, to)
+// posix version
+exports.relative = function(from, to) {
+  from = exports.resolve(from).substr(1);
+  to = exports.resolve(to).substr(1);
+
+  function trim(arr) {
+    var start = 0;
+    for (; start < arr.length; start++) {
+      if (arr[start] !== '') break;
+    }
+
+    var end = arr.length - 1;
+    for (; end >= 0; end--) {
+      if (arr[end] !== '') break;
+    }
+
+    if (start > end) return [];
+    return arr.slice(start, end - start + 1);
+  }
+
+  var fromParts = trim(from.split('/'));
+  var toParts = trim(to.split('/'));
+
+  var length = Math.min(fromParts.length, toParts.length);
+  var samePartsLength = length;
+  for (var i = 0; i < length; i++) {
+    if (fromParts[i] !== toParts[i]) {
+      samePartsLength = i;
+      break;
+    }
+  }
+
+  var outputParts = [];
+  for (var i = samePartsLength; i < fromParts.length; i++) {
+    outputParts.push('..');
+  }
+
+  outputParts = outputParts.concat(toParts.slice(samePartsLength));
+
+  return outputParts.join('/');
+};
+
+exports.sep = '/';
+exports.delimiter = ':';
+
+exports.dirname = function(path) {
+  var result = splitPath(path),
+      root = result[0],
+      dir = result[1];
+
+  if (!root && !dir) {
+    // No dirname whatsoever
+    return '.';
+  }
+
+  if (dir) {
+    // It has a dirname, strip trailing slash
+    dir = dir.substr(0, dir.length - 1);
+  }
+
+  return root + dir;
+};
+
+
+exports.basename = function(path, ext) {
+  var f = splitPath(path)[2];
+  // TODO: make this comparison case-insensitive on windows?
+  if (ext && f.substr(-1 * ext.length) === ext) {
+    f = f.substr(0, f.length - ext.length);
+  }
+  return f;
+};
+
+
+exports.extname = function(path) {
+  return splitPath(path)[3];
+};
+
+function filter (xs, f) {
+    if (xs.filter) return xs.filter(f);
+    var res = [];
+    for (var i = 0; i < xs.length; i++) {
+        if (f(xs[i], i, xs)) res.push(xs[i]);
+    }
+    return res;
+}
+
+// String.prototype.substr - negative index don't work in IE8
+var substr = 'ab'.substr(-1) === 'b'
+    ? function (str, start, len) { return str.substr(start, len) }
+    : function (str, start, len) {
+        if (start < 0) start = str.length + start;
+        return str.substr(start, len);
+    }
+;
+
+}).call(this,require('_process'))
+},{"_process":16}],16:[function(require,module,exports){
+// shim for using process in browser
+var process = module.exports = {};
+
+// cached from whatever global is present so that test runners that stub it
+// don't break things.  But we need to wrap it in a try catch in case it is
+// wrapped in strict mode code which doesn't define any globals.  It's inside a
+// function because try/catches deoptimize in certain engines.
+
+var cachedSetTimeout;
+var cachedClearTimeout;
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+(function () {
+    try {
+        if (typeof setTimeout === 'function') {
+            cachedSetTimeout = setTimeout;
+        } else {
+            cachedSetTimeout = defaultSetTimout;
+        }
+    } catch (e) {
+        cachedSetTimeout = defaultSetTimout;
+    }
+    try {
+        if (typeof clearTimeout === 'function') {
+            cachedClearTimeout = clearTimeout;
+        } else {
+            cachedClearTimeout = defaultClearTimeout;
+        }
+    } catch (e) {
+        cachedClearTimeout = defaultClearTimeout;
+    }
+} ())
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
+var queue = [];
+var draining = false;
+var currentQueue;
+var queueIndex = -1;
+
+function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
+    draining = false;
+    if (currentQueue.length) {
+        queue = currentQueue.concat(queue);
+    } else {
+        queueIndex = -1;
+    }
+    if (queue.length) {
+        drainQueue();
+    }
+}
+
+function drainQueue() {
+    if (draining) {
+        return;
+    }
+    var timeout = runTimeout(cleanUpNextTick);
+    draining = true;
+
+    var len = queue.length;
+    while(len) {
+        currentQueue = queue;
+        queue = [];
+        while (++queueIndex < len) {
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
+            }
+        }
+        queueIndex = -1;
+        len = queue.length;
+    }
+    currentQueue = null;
+    draining = false;
+    runClearTimeout(timeout);
+}
+
+process.nextTick = function (fun) {
+    var args = new Array(arguments.length - 1);
+    if (arguments.length > 1) {
+        for (var i = 1; i < arguments.length; i++) {
+            args[i - 1] = arguments[i];
+        }
+    }
+    queue.push(new Item(fun, args));
+    if (queue.length === 1 && !draining) {
+        runTimeout(drainQueue);
+    }
+};
+
+// v8 likes predictible objects
+function Item(fun, array) {
+    this.fun = fun;
+    this.array = array;
+}
+Item.prototype.run = function () {
+    this.fun.apply(null, this.array);
+};
+process.title = 'browser';
+process.browser = true;
+process.env = {};
+process.argv = [];
+process.version = ''; // empty string to avoid regexp issues
+process.versions = {};
+
+function noop() {}
+
+process.on = noop;
+process.addListener = noop;
+process.once = noop;
+process.off = noop;
+process.removeListener = noop;
+process.removeAllListeners = noop;
+process.emit = noop;
+process.prependListener = noop;
+process.prependOnceListener = noop;
+
+process.listeners = function (name) { return [] }
+
+process.binding = function (name) {
+    throw new Error('process.binding is not supported');
+};
+
+process.cwd = function () { return '/' };
+process.chdir = function (dir) {
+    throw new Error('process.chdir is not supported');
+};
+process.umask = function() { return 0; };
+
+},{}]},{},[1]);
+</script>
+</html>
